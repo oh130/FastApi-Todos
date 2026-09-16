@@ -1,1 +1,5 @@
-fastapi[standard]
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
+httpx==0.28.1
+prometheus-fastapi-instrumentator==8.1.0
+prometheus-client==0.26.0

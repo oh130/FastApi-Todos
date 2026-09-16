@@ -3,32 +3,48 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>To-Do List</title>
+  <title>To-Do List v2.0.0</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 680px; margin: 2rem auto; padding: 0 1rem; }
-    form { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    form, .filters { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1rem; }
     input[type="text"] { flex: 1 1 12rem; padding: .55rem; }
     button { padding: .5rem .7rem; cursor: pointer; }
     ul { list-style: none; padding: 0; }
     li { display: flex; align-items: center; gap: .5rem; padding: .55rem 0; border-bottom: 1px solid #e5e5e5; }
     li span { flex: 1; }
     .done { text-decoration: line-through; color: #888; }
+    .priority { border-radius: 999px; font-size: .8rem; font-weight: 700; padding: .18rem .45rem; }
+    .priority-high { background: #ffe0e0; color: #a40000; }
+    .priority-medium { background: #fff0c7; color: #795600; }
+    .priority-low { background: #def3e4; color: #176638; }
+    .due { color: #555; font-size: .88rem; white-space: nowrap; }
     #error { color: #b00020; }
   </style>
 </head>
 <body>
-  <h1>To-Do List</h1>
+  <h1>To-Do List <small>v2.0.0</small></h1>
   <form id="todo-form">
     <input type="text" id="title" placeholder="제목 (예: 20231234 홍길동)" required>
     <input type="text" id="description" placeholder="설명 (선택 사항)">
+    <select id="priority" aria-label="우선순위">
+      <option value="high">높음</option>
+      <option value="medium" selected>보통</option>
+      <option value="low">낮음</option>
+    </select>
+    <input type="date" id="due-date" aria-label="마감일">
     <button type="submit">Add To-Do</button>
   </form>
+  <div class="filters">
+    <label>상태 <select id="status-filter"><option value="all">전체</option><option value="active">진행 중</option><option value="completed">완료</option></select></label>
+    <label>우선순위 <select id="priority-filter"><option value="all">전체</option><option value="high">높음</option><option value="medium">보통</option><option value="low">낮음</option></select></label>
+  </div>
   <p id="error" role="alert" hidden></p>
   <ul id="todo-list"></ul>
   <script>
     const $ = (id) => document.getElementById(id);
     const listEl = $("todo-list");
     const errorEl = $("error");
+    let allTodos = [];
 
     async function api(url, method = "GET", body) {
       const response = await fetch(url, body
@@ -43,14 +59,20 @@
       catch (error) { errorEl.textContent = `${action} 실패: ${error.message}`; errorEl.hidden = false; }
     }
 
-    const load = () => run("목록 불러오기", async () => render(await api("/todos")));
+    const load = () => run("목록 불러오기", async () => { allTodos = await api("/todos"); render(); });
     const save = (id, todo) => run("수정", async () => { await api(`/todos/${id}`, "PUT", todo); await load(); });
 
     function makeButton(label, onclick) {
       return Object.assign(document.createElement("button"), { textContent: label, onclick });
     }
 
-    function render(todos) {
+    function render() {
+      const status = $("status-filter").value;
+      const priority = $("priority-filter").value;
+      const todos = allTodos.filter((todo) =>
+        (status === "all" || (status === "completed" ? todo.completed : !todo.completed)) &&
+        (priority === "all" || todo.priority === priority)
+      );
       listEl.replaceChildren(...todos.map((todo) => {
         const check = Object.assign(document.createElement("input"), {
           type: "checkbox", checked: todo.completed,
@@ -60,8 +82,19 @@
           textContent: todo.description ? `${todo.title} — ${todo.description}` : todo.title,
           className: todo.completed ? "done" : "",
         });
+        const priorityLabel = { high: "높음", medium: "보통", low: "낮음" }[todo.priority];
+        const priorityEl = Object.assign(document.createElement("span"), {
+          textContent: priorityLabel,
+          className: `priority priority-${todo.priority}`,
+        });
+        const dueEl = todo.due_date ? Object.assign(document.createElement("span"), {
+          textContent: `마감 ${todo.due_date}`,
+          className: "due",
+        }) : null;
         const item = document.createElement("li");
-        item.append(check, text, makeButton("Edit", () => edit(todo)), makeButton("Delete", () => remove(todo.id)));
+        item.append(check, text, priorityEl);
+        if (dueEl) item.append(dueEl);
+        item.append(makeButton("Edit", () => edit(todo)), makeButton("Delete", () => remove(todo.id)));
         return item;
       }));
     }
@@ -71,7 +104,16 @@
       if (title === null) return;
       const description = prompt("새 설명:", todo.description);
       if (description === null) return;
-      save(todo.id, { ...todo, title: title.trim(), description: description.trim() });
+      const priority = prompt("우선순위 (high / medium / low):", todo.priority);
+      if (priority === null) return;
+      if (!["high", "medium", "low"].includes(priority.trim())) {
+        errorEl.textContent = "수정 실패: 우선순위는 high, medium, low 중 하나여야 합니다.";
+        errorEl.hidden = false;
+        return;
+      }
+      const dueDate = prompt("마감일 (YYYY-MM-DD, 비우면 없음):", todo.due_date || "");
+      if (dueDate === null) return;
+      save(todo.id, { ...todo, title: title.trim(), description: description.trim(), priority: priority.trim(), due_date: dueDate.trim() || null });
     }
 
     function remove(id) {
@@ -82,11 +124,18 @@
     $("todo-form").onsubmit = (event) => {
       event.preventDefault();
       run("추가", async () => {
-        await api("/todos", "POST", { title: $("title").value.trim(), description: $("description").value.trim() });
+        await api("/todos", "POST", {
+          title: $("title").value.trim(),
+          description: $("description").value.trim(),
+          priority: $("priority").value,
+          due_date: $("due-date").value || null,
+        });
         event.target.reset();
         await load();
       });
     };
+    $("status-filter").onchange = render;
+    $("priority-filter").onchange = render;
     load();
   </script>
 </body>

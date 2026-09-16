@@ -1,9 +1,12 @@
 import json
+from datetime import date
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from prometheus_fastapi_instrumentator import Instrumentator
 
 BASE_DIR = Path(__file__).resolve().parent
 TODO_FILE = BASE_DIR / "todo.json"
@@ -13,12 +16,15 @@ if not TODO_FILE.exists():
     TODO_FILE.write_text("[]", encoding="utf-8")
 
 app = FastAPI(title="To-Do List API")
+Instrumentator().instrument(app).expose(app, include_in_schema=False)
 
 
 class TodoIn(BaseModel):
     title: str = Field(min_length=1, max_length=100)
     description: str = ""
     completed: bool = False
+    priority: Literal["low", "medium", "high"] = "medium"
+    due_date: date | None = None
 
 
 class TodoItem(TodoIn):
@@ -32,7 +38,7 @@ def load_todos() -> list[TodoItem]:
 
 def save_todos(todos: list[TodoItem]) -> None:
     data = json.dumps(
-        [todo.model_dump() for todo in todos], indent=2, ensure_ascii=False
+        [todo.model_dump(mode="json") for todo in todos], indent=2, ensure_ascii=False
     )
     TODO_FILE.write_text(data, encoding="utf-8")
 
