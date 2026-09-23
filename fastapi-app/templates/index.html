@@ -3,26 +3,56 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>To-Do List v2.0.0</title>
+  <title>To-Do List v3.0.0</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 680px; margin: 2rem auto; padding: 0 1rem; }
+    :root {
+      --bg: #ffffff;
+      --fg: #1a1a1a;
+      --muted: #555;
+      --border: #e5e5e5;
+      --done: #888;
+      --error: #b00020;
+      --priority-high-bg: #ffe0e0;
+      --priority-high-fg: #a40000;
+      --priority-medium-bg: #fff0c7;
+      --priority-medium-fg: #795600;
+      --priority-low-bg: #def3e4;
+      --priority-low-fg: #176638;
+    }
+    [data-theme="dark"] {
+      --bg: #1a1a1a;
+      --fg: #e8e8e8;
+      --muted: #aaa;
+      --border: #3a3a3a;
+      --done: #777;
+      --error: #ff6b6b;
+      --priority-high-bg: #4a1f1f;
+      --priority-high-fg: #ff8a8a;
+      --priority-medium-bg: #4a3f1a;
+      --priority-medium-fg: #ffd66b;
+      --priority-low-bg: #1f3a28;
+      --priority-low-fg: #7fe0a0;
+    }
+    body { font-family: system-ui, sans-serif; max-width: 680px; margin: 2rem auto; padding: 0 1rem; background: var(--bg); color: var(--fg); }
+    h1 { display: flex; align-items: center; justify-content: space-between; gap: .5rem; }
     form, .filters { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1rem; }
     input[type="text"] { flex: 1 1 12rem; padding: .55rem; }
     button { padding: .5rem .7rem; cursor: pointer; }
+    #theme-toggle { font-size: .85rem; padding: .35rem .6rem; }
     ul { list-style: none; padding: 0; }
-    li { display: flex; align-items: center; gap: .5rem; padding: .55rem 0; border-bottom: 1px solid #e5e5e5; }
+    li { display: flex; align-items: center; gap: .5rem; padding: .55rem 0; border-bottom: 1px solid var(--border); }
     li span { flex: 1; }
-    .done { text-decoration: line-through; color: #888; }
+    .done { text-decoration: line-through; color: var(--done); }
     .priority { border-radius: 999px; font-size: .8rem; font-weight: 700; padding: .18rem .45rem; }
-    .priority-high { background: #ffe0e0; color: #a40000; }
-    .priority-medium { background: #fff0c7; color: #795600; }
-    .priority-low { background: #def3e4; color: #176638; }
-    .due { color: #555; font-size: .88rem; white-space: nowrap; }
-    #error { color: #b00020; }
+    .priority-high { background: var(--priority-high-bg); color: var(--priority-high-fg); }
+    .priority-medium { background: var(--priority-medium-bg); color: var(--priority-medium-fg); }
+    .priority-low { background: var(--priority-low-bg); color: var(--priority-low-fg); }
+    .due { color: var(--muted); font-size: .88rem; white-space: nowrap; }
+    #error { color: var(--error); }
   </style>
 </head>
 <body>
-  <h1>To-Do List <small>v2.0.0</small></h1>
+  <h1>To-Do List <small>v3.0.0</small> <button id="theme-toggle" type="button" aria-label="다크모드 전환">🌙 다크모드</button></h1>
   <form id="todo-form">
     <input type="text" id="title" placeholder="제목 (예: 20231234 홍길동)" required>
     <input type="text" id="description" placeholder="설명 (선택 사항)">
@@ -45,6 +75,26 @@
     const listEl = $("todo-list");
     const errorEl = $("error");
     let allTodos = [];
+
+    const root = document.documentElement;
+    const themeToggle = $("theme-toggle");
+    function applyTheme(theme) {
+      if (theme === "dark") {
+        root.setAttribute("data-theme", "dark");
+        themeToggle.textContent = "☀️ 라이트모드";
+      } else {
+        root.removeAttribute("data-theme");
+        themeToggle.textContent = "🌙 다크모드";
+      }
+    }
+    let savedTheme = "light";
+    try { savedTheme = localStorage.getItem("theme") || "light"; } catch (e) {}
+    applyTheme(savedTheme);
+    themeToggle.onclick = () => {
+      const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      applyTheme(next);
+      try { localStorage.setItem("theme", next); } catch (e) {}
+    };
 
     async function api(url, method = "GET", body) {
       const response = await fetch(url, body
