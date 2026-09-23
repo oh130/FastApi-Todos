@@ -6,7 +6,6 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from prometheus_fastapi_instrumentator import Instrumentator
 
 BASE_DIR = Path(__file__).resolve().parent
 TODO_FILE = BASE_DIR / "todo.json"
@@ -16,7 +15,6 @@ if not TODO_FILE.exists():
     TODO_FILE.write_text("[]", encoding="utf-8")
 
 app = FastAPI(title="To-Do List API")
-Instrumentator().instrument(app).expose(app, include_in_schema=False)
 
 
 class TodoIn(BaseModel):
