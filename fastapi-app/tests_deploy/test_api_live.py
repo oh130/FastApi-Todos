@@ -3,7 +3,7 @@ import os
 import httpx2
 import pytest
 
-BASE_URL = os.environ.get("API_BASE_URL", "http://163.239.77.78:5002")
+BASE_URL = os.environ.get("API_BASE_URL", "http://163.239.77.78:5017")
 
 
 @pytest.fixture(scope="module")

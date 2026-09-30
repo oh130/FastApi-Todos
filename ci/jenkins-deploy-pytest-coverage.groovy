@@ -1,9 +1,10 @@
 // Jenkins Item 이름 예: "Jenkins Deploy Pytest_Coverage"
 // New Item -> Pipeline -> 아래 스크립트를 그대로 Pipeline script 란에 붙여넣기
 //
-// 지난주 "Jenkins Deploy Docker direct - team" Job과 같은 대상(팀 서버, 포트 5002)을 씁니다.
-// 컨테이너 이름도 지난주와 동일한 fastapi-app2로 맞춰서, 이 파이프라인이 그 컨테이너를 교체합니다
-// (이름을 다르게 하면 같은 포트를 두 컨테이너가 쓰려다 충돌납니다).
+// 팀 서버(78)는 여러 팀원이 같이 쓰는 서버라 5001/5002 같은 가이드 예시 포트를 그대로 쓰면
+// 다른 사람 컨테이너와 충돌합니다 (실제로 5002는 팀원이 먼저 점유해서 겹친 적 있음).
+// 팀 관례상 포트는 "50" + 학번 뒤 2자리(sogang017 -> 5017)로 맞췄습니다.
+// 컨테이너 이름도 본인 전용으로 구분되게 지었습니다.
 //
 // 가이드 예시의 BRANCH_NAME='main', credentials(['admin'])은 이 레포 실제 값과 달라서
 // master / deploy-key로 고쳤습니다.
@@ -20,8 +21,8 @@ pipeline {
         REPO_URL       = 'https://github.com/oh130/FastApi-Todos.git'
         BRANCH_NAME    = 'master'
         APP_DIR        = 'fastapi-app'
-        CONTAINER_NAME = 'fastapi-app2'
-        HOST_PORT      = '5002'
+        CONTAINER_NAME = 'fastapi-app-sogang017'
+        HOST_PORT      = '5017'
         CONTAINER_PORT = '8000'
     }
 
