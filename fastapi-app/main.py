@@ -70,6 +70,12 @@ def update_todo(todo_id: int, payload: TodoIn) -> TodoItem:
     return todos[find_index(todos, todo_id)]
 
 
+@app.delete("/todos/completed", status_code=204)
+def delete_completed_todos() -> None:
+    todos = load_todos()
+    save_todos([todo for todo in todos if not todo.completed])
+
+
 @app.delete("/todos/{todo_id}", status_code=204)
 def delete_todo(todo_id: int) -> None:
     todos = load_todos()

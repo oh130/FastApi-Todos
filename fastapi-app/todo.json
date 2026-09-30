@@ -3,6 +3,8 @@
     "title": "20201603 오승민",
     "description": "과제 제출하기",
     "completed": false,
+    "priority": "medium",
+    "due_date": null,
     "id": 1
   }
 ]

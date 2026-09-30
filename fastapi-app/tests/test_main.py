@@ -70,3 +70,22 @@ def test_delete_todo():
 def test_delete_todo_not_found():
     response = client.delete("/todos/1")
     assert response.status_code == 404
+
+
+def test_delete_completed_todos():
+    active = TodoItem(id=1, title="Active", description="", completed=False)
+    done = TodoItem(id=2, title="Done", description="", completed=True)
+    save_todos([active, done])
+    response = client.delete("/todos/completed")
+    assert response.status_code == 204
+    remaining = load_todos()
+    assert len(remaining) == 1
+    assert remaining[0].id == 1
+
+
+def test_delete_completed_todos_when_none_completed():
+    todo = TodoItem(id=1, title="Active", description="", completed=False)
+    save_todos([todo])
+    response = client.delete("/todos/completed")
+    assert response.status_code == 204
+    assert len(load_todos()) == 1

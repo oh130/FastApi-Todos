@@ -67,6 +67,7 @@
   <div class="filters">
     <label>상태 <select id="status-filter"><option value="all">전체</option><option value="active">진행 중</option><option value="completed">완료</option></select></label>
     <label>우선순위 <select id="priority-filter"><option value="all">전체</option><option value="high">높음</option><option value="medium">보통</option><option value="low">낮음</option></select></label>
+    <button id="clear-completed" type="button">완료 항목 일괄삭제</button>
   </div>
   <p id="error" role="alert" hidden></p>
   <ul id="todo-list"></ul>
@@ -186,6 +187,10 @@
     };
     $("status-filter").onchange = render;
     $("priority-filter").onchange = render;
+    $("clear-completed").onclick = () => {
+      if (!confirm("완료된 항목을 모두 삭제할까요?")) return;
+      run("완료 항목 일괄삭제", async () => { await api("/todos/completed", "DELETE"); await load(); });
+    };
     load();
   </script>
 </body>
