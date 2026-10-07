@@ -44,4 +44,15 @@ Quality Gate: Passed · Lines of Code 221 · Coverage 73.4% · Duplications 0.0%
 |---|---|---|---|---|---|
 | S4 | docker:S6504 | Security | Low | S1을 고치면서 `COPY --chown=appuser:appuser main.py todo.json ./`로 바꿨는데, 이게 "민감한 리소스를 non-root 유저가 쓰기 가능하게 복사하면 안 된다"는 규칙에 새로 걸림 | **수정**. 실행 중 고칠 필요가 없는 `main.py`/`templates/`는 root 소유·읽기전용으로 복사하고, 앱이 실제로 쓰기를 하는 `todo.json`만 `appuser` 소유로 분리 |
 
-실제 쓰기가 필요한 `todo.json`에 대해서는 이 규칙이 다시 뜰 수 있는데, 그 경우엔 "데이터 파일이라 쓰기 권한이 실제로 필요함"을 근거로 보류(수용) 처리할 예정.
+실제 쓰기가 필요한 `todo.json`에 대해서는 이 규칙이 다시 뜰 수 있는데, 그 경우엔 "데이터 파일이라 쓰기 권한이 실제로 필요함"을 근거로 보류(수용) 처리했다.
+
+## Claude Code 활용 방법과 소감
+
+이번 주 과제에서 Claude Code를 아래와 같이 활용했다.
+
+1. **OWASP Top 10 1차 분석**: SonarQube 설치 전에, Claude Code에게 `main.py`, `templates/index.html`, `Dockerfile`, CI 스크립트, `requirements.txt` 전체를 OWASP Top 10(2021) 기준으로 검토하게 했다. 코드가 작아서(약 220줄) 전체를 한 번에 훑으며 "인증 부재", "Swagger UI 공개", "의존성 버전 정책", "description 길이 제한 없음" 같은 항목들을 근거(파일·라인)와 함께 표로 정리해줬고, 그중 과제 요구사항과 충돌하지 않는 3건을 바로 코드로 고치고 테스트까지 추가해 검증했다.
+2. **SonarQube 연동 및 발견사항 대응**: SonarQube 1차 분석에서 Dockerfile `COPY` 패턴(S6470), pytest fixture의 불필요한 `yield`(S9100), API 응답 미문서화(S8415) 3건이 나왔는데, 이슈 설명을 Claude Code에 그대로 붙여넣자 각각의 원인과 고치는 방법을 설명해주고 바로 수정해줬다.
+3. **수정의 부작용 디버깅**: Dockerfile을 고치는 과정에서 `--chown`을 그대로 옮기는 바람에 새로운 보안 이슈(S6504, 앱 코드가 non-root 유저 소유로 쓰기 가능한 상태)가 생겼는데, 이것도 Claude Code가 "실행 중 고칠 필요 없는 파일은 root 소유로, 실제 쓰기가 필요한 `todo.json`만 appuser 소유로" 분리하는 방식으로 바로 잡아줬다.
+4. **인프라 트러블슈팅**: SonarQube(Docker 컨테이너)와 Jenkins(호스트 설치) 사이에서 Webhook이 전달되지 않는 문제가 있었는데, "컨테이너 내부망과 호스트 방화벽 대역이 다르다"는 원인을 Claude Code가 짚어줘서 `docker network inspect`로 서브넷을 확인하고 방화벽 규칙을 추가해 해결했다.
+
+**소감**: SonarQube는 코드 스멜·버그·문서화 미비 같은 "품질" 관점의 정적 분석에 강했고, Claude Code는 인증·설정 노출 같은 "설계" 수준의 보안 분석과 인프라 트러블슈팅에 강했다. 한쪽이 못 보는 부분을 다른 쪽이 메워주는 느낌이라, 둘을 같이 쓰니 혼자 코드를 볼 때보다 훨씬 꼼꼼하게 점검이 됐다. 특히 "수정하다가 새 이슈가 생기는" 상황을 Claude Code와 함께 바로바로 재분석하면서 잡아나갈 수 있었던 게 가장 체감되는 장점이었다.
