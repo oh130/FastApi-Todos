@@ -17,9 +17,18 @@ if not TODO_FILE.exists():
 app = FastAPI(title="To-Do List API")
 
 
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    return response
+
+
 class TodoIn(BaseModel):
     title: str = Field(min_length=1, max_length=100)
-    description: str = ""
+    description: str = Field(default="", max_length=1000)
     completed: bool = False
     priority: Literal["low", "medium", "high"] = "medium"
     due_date: date | None = None

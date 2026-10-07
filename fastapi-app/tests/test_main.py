@@ -89,3 +89,16 @@ def test_delete_completed_todos_when_none_completed():
     response = client.delete("/todos/completed")
     assert response.status_code == 204
     assert len(load_todos()) == 1
+
+
+def test_create_todo_description_too_long_is_rejected():
+    todo = {"title": "Test", "description": "x" * 1001}
+    response = client.post("/todos", json=todo)
+    assert response.status_code == 422
+
+
+def test_response_has_security_headers():
+    response = client.get("/todos")
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["referrer-policy"] == "no-referrer"
