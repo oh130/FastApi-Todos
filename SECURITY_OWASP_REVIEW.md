@@ -24,9 +24,16 @@
 - **인증 부재(#4)**, **Swagger UI 공개(#5)**: 과제 설계(로그인 없는 개인용 데모 앱, 수동 테스트용 Swagger UI 요구)와 충돌하고, 다루는 데이터가 민감하지 않아 현재 리스크가 낮다고 판단해 지금 단계에서는 고치지 않음
 - **의존성 버전 고정 방식(#6)**: 가이드가 요구한 정책(`>=` 최소 버전)과 상충하지 않게, 고치는 대신 `pip-audit`으로 보완하는 방향 제안
 
-## SonarQube 비교 (추후 채워 넣을 섹션)
-SonarQube 1차 분석 결과가 나오면 아래에 두 도구의 발견사항을 교차 비교해 기록합니다.
+## SonarQube 1차 분석 결과 (2026-10-07, 커밋 `b80c1b9`)
 
-| SonarQube 발견사항 | Claude 분석과 겹치는 항목 | 비고 |
-|---|---|---|
-| (분석 후 채움) | | |
+Quality Gate: Passed · Lines of Code 221 · Coverage 73.4% · Duplications 0.0% · 총 3건 (Security 1 / Reliability 0 / Maintainability 2)
+
+| # | 룰 | 분류 | 심각도 | 발견사항 | Claude 분석과의 관계 | 검토의견 / 수정여부 |
+|---|---|---|---|---|---|---|
+| S1 | docker:S6470 | Security | High | `Dockerfile`에서 `COPY --chown=appuser:appuser . .`로 빌드 컨텍스트 전체를 재귀 복사 — 민감 파일이 실수로 이미지에 들어갈 위험 | Claude 1차 분석 #1(테스트 코드가 이미지에 포함되는 문제)과 같은 근본 원인(`COPY . .`)을 다른 각도에서 지적 | **수정**. `.dockerignore`로 막는 것보다 확실하게, 필요한 파일(`main.py`, `todo.json`, `templates/`)만 명시적으로 복사하도록 Dockerfile 자체를 변경 |
+| S2 | python:S9100 | Maintainability | Medium | `tests/test_main.py`의 `setup_and_teardown` fixture가 teardown 코드 없이 `yield`만 사용 | 새 발견 (테스트 코드 스타일) | **수정**. `yield` 제거, 함수명도 `setup_todo_file`로 변경 (teardown이 없으니 이름도 맞게) |
+| S3 | python:S8415 | Maintainability | High | `HTTPException(status_code=404)`를 던지는 `update_todo`/`delete_todo` 엔드포인트가 OpenAPI 문서(`responses=`)에 404를 명시하지 않음 | 새 발견 (API 문서화) | **수정**. 두 엔드포인트에 `responses={404: {"description": "To-Do item not found"}}` 추가 |
+
+**SonarQube Community Edition의 한계**: 대시보드 자체에 "SQL Injection, XSS 등 심각한 인젝션 취약점은 스캔하지 않는다"는 경고가 표시됨 — 유료 에디션 기능. 즉 Claude Code의 OWASP Top 10 분석(인증 부재, Swagger 노출 등)과 SonarQube의 코드 품질 분석은 **서로 겹치지 않고 보완하는 관계**였다. SonarQube는 코드 스멜/버그/문서화 미비 같은 유지보수성 이슈를, Claude Code는 설계·구성 수준의 보안 이슈를 각각 잡아냈다.
+
+이번 차수에 Claude 1차 분석 3건 + SonarQube 3건, 총 6건 중 수정 가능한 6건을 모두 반영했다 (인증 부재·Swagger 공개·의존성 정책 3건은 과제 요구사항과 상충하거나 의도된 설계라 보류).

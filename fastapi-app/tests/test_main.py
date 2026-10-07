@@ -8,10 +8,9 @@ client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def setup_and_teardown(tmp_path, monkeypatch):
+def setup_todo_file(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "TODO_FILE", tmp_path / "todo.json")
     save_todos([])
-    yield
 
 
 def test_get_todos_empty():

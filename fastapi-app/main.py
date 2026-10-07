@@ -71,7 +71,7 @@ def create_todo(payload: TodoIn) -> TodoItem:
     return todo
 
 
-@app.put("/todos/{todo_id}")
+@app.put("/todos/{todo_id}", responses={404: {"description": "To-Do item not found"}})
 def update_todo(todo_id: int, payload: TodoIn) -> TodoItem:
     todos = load_todos()
     todos[find_index(todos, todo_id)] = TodoItem(id=todo_id, **payload.model_dump())
@@ -85,7 +85,11 @@ def delete_completed_todos() -> None:
     save_todos([todo for todo in todos if not todo.completed])
 
 
-@app.delete("/todos/{todo_id}", status_code=204)
+@app.delete(
+    "/todos/{todo_id}",
+    status_code=204,
+    responses={404: {"description": "To-Do item not found"}},
+)
 def delete_todo(todo_id: int) -> None:
     todos = load_todos()
     del todos[find_index(todos, todo_id)]
