@@ -10,3 +10,5 @@ pytest_report/
 api_test_report/
 ui_test_report/
 .coverage
+coverage.xml
+.scannerwork/
