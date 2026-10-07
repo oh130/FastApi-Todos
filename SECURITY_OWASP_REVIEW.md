@@ -37,3 +37,11 @@ Quality Gate: Passed · Lines of Code 221 · Coverage 73.4% · Duplications 0.0%
 **SonarQube Community Edition의 한계**: 대시보드 자체에 "SQL Injection, XSS 등 심각한 인젝션 취약점은 스캔하지 않는다"는 경고가 표시됨 — 유료 에디션 기능. 즉 Claude Code의 OWASP Top 10 분석(인증 부재, Swagger 노출 등)과 SonarQube의 코드 품질 분석은 **서로 겹치지 않고 보완하는 관계**였다. SonarQube는 코드 스멜/버그/문서화 미비 같은 유지보수성 이슈를, Claude Code는 설계·구성 수준의 보안 이슈를 각각 잡아냈다.
 
 이번 차수에 Claude 1차 분석 3건 + SonarQube 3건, 총 6건 중 수정 가능한 6건을 모두 반영했다 (인증 부재·Swagger 공개·의존성 정책 3건은 과제 요구사항과 상충하거나 의도된 설계라 보류).
+
+## SonarQube 2차 분석에서 새로 발견된 항목 (수정의 부작용)
+
+| # | 룰 | 분류 | 심각도 | 발견사항 | 검토의견 / 수정여부 |
+|---|---|---|---|---|---|
+| S4 | docker:S6504 | Security | Low | S1을 고치면서 `COPY --chown=appuser:appuser main.py todo.json ./`로 바꿨는데, 이게 "민감한 리소스를 non-root 유저가 쓰기 가능하게 복사하면 안 된다"는 규칙에 새로 걸림 | **수정**. 실행 중 고칠 필요가 없는 `main.py`/`templates/`는 root 소유·읽기전용으로 복사하고, 앱이 실제로 쓰기를 하는 `todo.json`만 `appuser` 소유로 분리 |
+
+실제 쓰기가 필요한 `todo.json`에 대해서는 이 규칙이 다시 뜰 수 있는데, 그 경우엔 "데이터 파일이라 쓰기 권한이 실제로 필요함"을 근거로 보류(수용) 처리할 예정.

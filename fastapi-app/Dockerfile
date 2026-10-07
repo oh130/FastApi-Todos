@@ -13,8 +13,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 
-COPY --chown=appuser:appuser main.py todo.json ./
-COPY --chown=appuser:appuser templates/ ./templates/
+COPY main.py ./
+COPY templates/ ./templates/
+
+COPY --chown=appuser:appuser todo.json ./
 
 USER appuser
 
