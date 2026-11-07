@@ -1,3 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from fastapi.testclient import TestClient
 from prometheus_client import REGISTRY
@@ -161,3 +163,18 @@ def test_items_current_gauge_reflects_active_and_completed_counts():
     ])
     assert _gauge_value("todo_items_current", "completed") == 1
     assert _gauge_value("todo_items_current", "active") == 2
+
+
+def test_concurrent_creates_do_not_corrupt_todo_file():
+    # JMeter 부하 테스트에서 락 없이 동시 쓰기가 몰리면 todo.json이 깨지는 것을 확인했던 회귀 테스트.
+    request_count = 30
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        responses = list(pool.map(
+            lambda i: client.post("/todos", json={"title": f"concurrent-{i}"}),
+            range(request_count),
+        ))
+
+    assert all(response.status_code == 201 for response in responses)
+    todos = load_todos()  # 파일이 손상됐다면 json.JSONDecodeError로 여기서 바로 실패한다
+    assert len(todos) == request_count
+    assert len({todo.id for todo in todos}) == request_count  # id 중복(lost update) 없음
