@@ -3,88 +3,115 @@ services:
     build:
       context: ./fastapi-app
       dockerfile: Dockerfile
-    container_name: FastApi-app
+    container_name: fastapi-app-sogang017
     ports:
-      - "5001:8000"
+      - "5017:8000"
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # 부하테스트로 한계점을 보기 위해 임의로 가정한 운영 제약(Operational Profile 대비 저사양 환경).
+    # Grafana/cAdvisor형 대시보드에서 이 한도에 가까워지는 지점을 관찰한다.
+    mem_limit: "128m"
+    cpus: "0.5"
+    networks:
+      - loadtest-net
+
+  jmeter:
+    build:
+      context: ./jmeter
+      dockerfile: Dockerfile
+    container_name: jmeter-sogang017
+    volumes:
+      - ./jmeter:/jmeter
+    command:
+      - jmeter
+      - -n
+      - -t
+      - /jmeter/fastapi_test_plan.jmx
+      - -l
+      - /jmeter/results.jtl
+      - -JTARGET_HOST=fastapi-app
+      - -JTARGET_PORT=8000
+      - -JINFLUXDB_URL=http://influxdb:8086/write?db=jmeter
+      - -Jjmeter.save.saveservice.output_format=csv
+      - -e
+      - -o
+      - /jmeter/report
+    networks:
+      - loadtest-net
+
+  influxdb:
+    image: influxdb:1.8
+    container_name: influxdb-sogang017
+    environment:
+      - INFLUXDB_DB=jmeter
+    ports:
+      - "127.0.0.1:8117:8086"   # 인증 없는 쓰기 API라 외부 노출 금지
+    volumes:
+      - influxdb-data:/var/lib/influxdb
+    networks:
+      - loadtest-net
 
   sonarqube:
-    image: sonarqube:26.9.0.129388-community
-    container_name: sonarqube
-    read_only: true
+    image: sonarqube:26.10.0.133078-community
+    container_name: sonarqube-sogang017
     ports:
-      - "9000:9000"
+      - "127.0.0.1:9017:9000"   # 0.0.0.0 바인딩 금지 (인증 없는 관리 UI 노출 방지)
     environment:
       - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true
     volumes:
+      - sonarqube_conf:/opt/sonarqube/conf
       - sonarqube_data:/opt/sonarqube/data
-      - sonarqube_extensions:/opt/sonarqube/extensions
       - sonarqube_logs:/opt/sonarqube/logs
-      - sonarqube_temp:/opt/sonarqube/temp
-    tmpfs:
-      - /tmp
+      - sonarqube_extensions:/opt/sonarqube/extensions
+    networks:
+      - loadtest-net
 
   prometheus:
-    image: prom/prometheus:v3.15.0
-    container_name: prometheus
-    read_only: true
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    ports:
-      - "127.0.0.1:7070:9090"
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
+    image: prom/prometheus:v3.15.1
+    container_name: prometheus-sogang017
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:7017:9090"   # 외부 노출 금지
+    networks:
+      - loadtest-net
 
   grafana:
-    image: grafana/grafana:13.2.4
-    container_name: grafana
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+    image: grafana/grafana:13.3.0
+    container_name: grafana-sogang017
     ports:
-      - "3000:3000"
+      - "3002:3000"   # 팀 서버 공용 포트 — 팀 내 자리순 배정(본인: 2번째 자리)
     environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD 를 .env 에 설정하세요}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
       - GF_AUTH_BASIC_PASSWORD_POLICY=true
-      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
-      - GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false
-      - GF_PLUGINS_PREINSTALL_AUTO_UPDATE=false
     volumes:
       - grafana-data:/var/lib/grafana
+    networks:
+      - loadtest-net
 
   node-exporter:
     image: prom/node-exporter:v1.12.1
-    container_name: node-exporter
-    read_only: true
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+    container_name: node-exporter-sogang017
+    ports:
+      - "127.0.0.1:7117:9100"   # 인증 없음 — 외부 노출 금지
+    networks:
+      - loadtest-net
 
-  cadvisor:
-    image: ghcr.io/google/cadvisor:v0.60.6
-    container_name: cadvisor
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
-      - /dev/disk/:/dev/disk:ro
+networks:
+  loadtest-net:
+    driver: bridge
 
 volumes:
+  sonarqube_conf:
   sonarqube_data:
-  sonarqube_extensions:
   sonarqube_logs:
-  sonarqube_temp:
+  sonarqube_extensions:
   prometheus-data:
   grafana-data:
+  influxdb-data:
