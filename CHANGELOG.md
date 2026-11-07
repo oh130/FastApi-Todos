@@ -1,5 +1,11 @@
 # Release notes
 
+## v6.0.0 — 2026-11-07
+
+- Prometheus, Grafana, Node Exporter, cAdvisor를 docker-compose.yml에 추가해 애플리케이션/시스템/컨테이너 모니터링 환경을 구축했습니다.
+- `/metrics` 엔드포인트를 다시 노출하고(Prometheus용), To-Do 앱 고유의 비즈니스 지표(`todo_created_total`, `todo_completed_total`, `todo_deleted_total`, `todo_items_current`)를 추가했습니다.
+- Grafana에 Node Exporter Full(ID 1860), cAdvisor(ID 13946) 대시보드를 연동했습니다.
+
 ## v5.1.0 — 2026-10-07
 
 - SonarQube 1차 분석에서 발견된 이슈 3건을 수정했습니다 (Dockerfile의 `COPY` 패턴, pytest fixture의 불필요한 `yield`, 404 응답 미문서화).
