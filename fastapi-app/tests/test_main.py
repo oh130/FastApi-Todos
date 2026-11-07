@@ -1,10 +1,19 @@
 import pytest
 from fastapi.testclient import TestClient
+from prometheus_client import REGISTRY
 
 import main
 from main import app, save_todos, load_todos, TodoItem
 
 client = TestClient(app)
+
+
+def _counter_value(name: str) -> float:
+    return REGISTRY.get_sample_value(name) or 0.0
+
+
+def _gauge_value(name: str, status: str) -> float:
+    return REGISTRY.get_sample_value(name, {"status": status}) or 0.0
 
 
 @pytest.fixture(autouse=True)
@@ -101,3 +110,54 @@ def test_response_has_security_headers():
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-frame-options"] == "DENY"
     assert response.headers["referrer-policy"] == "no-referrer"
+
+
+def test_create_todo_increments_created_counter():
+    before = _counter_value("todo_created_total")
+    client.post("/todos", json={"title": "Test"})
+    assert _counter_value("todo_created_total") == before + 1
+
+
+def test_completing_todo_increments_completed_counter():
+    todo = TodoItem(id=1, title="Test", description="", completed=False)
+    save_todos([todo])
+    before = _counter_value("todo_completed_total")
+    client.put("/todos/1", json={"title": "Test", "completed": True})
+    assert _counter_value("todo_completed_total") == before + 1
+
+
+def test_uncompleted_update_does_not_increment_completed_counter():
+    todo = TodoItem(id=1, title="Test", description="", completed=False)
+    save_todos([todo])
+    before = _counter_value("todo_completed_total")
+    client.put("/todos/1", json={"title": "Updated", "completed": False})
+    assert _counter_value("todo_completed_total") == before
+
+
+def test_delete_todo_increments_deleted_counter():
+    todo = TodoItem(id=1, title="Test", description="", completed=False)
+    save_todos([todo])
+    before = _counter_value("todo_deleted_total")
+    client.delete("/todos/1")
+    assert _counter_value("todo_deleted_total") == before + 1
+
+
+def test_delete_completed_increments_deleted_counter_by_count():
+    save_todos([
+        TodoItem(id=1, title="A", description="", completed=True),
+        TodoItem(id=2, title="B", description="", completed=True),
+        TodoItem(id=3, title="C", description="", completed=False),
+    ])
+    before = _counter_value("todo_deleted_total")
+    client.delete("/todos/completed")
+    assert _counter_value("todo_deleted_total") == before + 2
+
+
+def test_items_current_gauge_reflects_active_and_completed_counts():
+    save_todos([
+        TodoItem(id=1, title="A", description="", completed=True),
+        TodoItem(id=2, title="B", description="", completed=False),
+        TodoItem(id=3, title="C", description="", completed=False),
+    ])
+    assert _gauge_value("todo_items_current", "completed") == 1
+    assert _gauge_value("todo_items_current", "active") == 2

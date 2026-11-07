@@ -5,6 +5,7 @@ from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
+from prometheus_client import Counter, Gauge
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, Field
 
@@ -18,6 +19,12 @@ if not TODO_FILE.exists():
 app = FastAPI(title="To-Do List API")
 
 Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
+
+# 비즈니스 지표: HTTP 요청 수와는 별개로 Todo 앱 고유의 상태를 나타내는 지표
+TODO_CREATED = Counter("todo_created_total", "Total number of to-do items created")
+TODO_COMPLETED = Counter("todo_completed_total", "Total number of to-do items marked completed")
+TODO_DELETED = Counter("todo_deleted_total", "Total number of to-do items deleted")
+TODO_ITEMS_CURRENT = Gauge("todo_items_current", "Current number of to-do items by status", ["status"])
 
 
 @app.middleware("http")
@@ -51,6 +58,9 @@ def save_todos(todos: list[TodoItem]) -> None:
         [todo.model_dump(mode="json") for todo in todos], indent=2, ensure_ascii=False
     )
     TODO_FILE.write_text(data, encoding="utf-8")
+    completed_count = sum(1 for todo in todos if todo.completed)
+    TODO_ITEMS_CURRENT.labels(status="completed").set(completed_count)
+    TODO_ITEMS_CURRENT.labels(status="active").set(len(todos) - completed_count)
 
 
 def find_index(todos: list[TodoItem], todo_id: int) -> int:
@@ -71,21 +81,28 @@ def create_todo(payload: TodoIn) -> TodoItem:
     new_id = max((todo.id for todo in todos), default=0) + 1
     todo = TodoItem(id=new_id, **payload.model_dump())
     save_todos(todos + [todo])
+    TODO_CREATED.inc()
     return todo
 
 
 @app.put("/todos/{todo_id}", responses={404: {"description": "To-Do item not found"}})
 def update_todo(todo_id: int, payload: TodoIn) -> TodoItem:
     todos = load_todos()
-    todos[find_index(todos, todo_id)] = TodoItem(id=todo_id, **payload.model_dump())
+    index = find_index(todos, todo_id)
+    just_completed = not todos[index].completed and payload.completed
+    todos[index] = TodoItem(id=todo_id, **payload.model_dump())
     save_todos(todos)
-    return todos[find_index(todos, todo_id)]
+    if just_completed:
+        TODO_COMPLETED.inc()
+    return todos[index]
 
 
 @app.delete("/todos/completed", status_code=204)
 def delete_completed_todos() -> None:
     todos = load_todos()
-    save_todos([todo for todo in todos if not todo.completed])
+    remaining = [todo for todo in todos if not todo.completed]
+    save_todos(remaining)
+    TODO_DELETED.inc(len(todos) - len(remaining))
 
 
 @app.delete(
@@ -97,6 +114,7 @@ def delete_todo(todo_id: int) -> None:
     todos = load_todos()
     del todos[find_index(todos, todo_id)]
     save_todos(todos)
+    TODO_DELETED.inc()
 
 
 @app.get("/", include_in_schema=False)
