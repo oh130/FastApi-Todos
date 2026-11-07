@@ -36,10 +36,35 @@ FastAPI로 만든 간단한 To-do List 앱입니다. 매주 데브옵스 수업�
 - 보안 패치가 반영된 fastapi/starlette/httpx2/pytest 최신 버전으로 의존성 갱신
 - 앱 기능: 완료 항목 일괄삭제 (`DELETE /todos/completed`)
 
+### Week 5 — 정적 분석: SonarQube & OWASP Top 10 (v5.0.0 / v5.1.0, 2026-10-07)
+- Docker로 SonarQube 설치, Jenkins Pipeline에 "테스트 이후 → Docker 빌드 이전" 단계로 정적 분석 추가
+- SonarQube Scanner 플러그인, Webhook 연동(Quality Gate 결과를 Jenkins 빌드에 반영)
+- Claude Code로 OWASP Top 10(2021) 1차 분석 수행, 발견사항 9건 문서화 → [SECURITY_OWASP_REVIEW.md](SECURITY_OWASP_REVIEW.md)
+- 1차 분석(3건: 테스트코드 이미지 포함, description 길이 무제한, 보안 헤더 부재) 수정 → v5.0.0
+- SonarQube 1차 분석 발견 3건(Dockerfile COPY 패턴, 불필요한 yield, 404 미문서화) + 수정 중 새로 생긴 이슈 1건까지 수정, 2차 분석 확인 → v5.1.0
+- 앱 기능: UI 전면 리디자인(카드형 레이아웃)
+
+### Week 6 — 모니터링: Prometheus & Grafana (v6.0.0, 2026-11-07)
+- `docker-compose.yml`에 Prometheus, Grafana, Node Exporter, cAdvisor 추가
+- `/metrics` 엔드포인트 재노출, Grafana에 Node Exporter Full(ID 1860)·cAdvisor(ID 13946) 대시보드 연동
+- 앱 기능: To-do 앱 고유의 Prometheus 비즈니스 지표 추가 (`todo_created_total`, `todo_completed_total`, `todo_deleted_total`, `todo_items_current`)
+
+### Week 7 — 부하 테스트: JMeter & InfluxDB (v7.0.0, 진행 중)
+- JMeter 테스트 플랜 작성(초기화면/조회/등록/수정/삭제 5개 엔드포인트), 전용 Docker 이미지로 패키징
+- InfluxDB 추가 + JMeter Backend Listener로 부하테스트 결과를 실시간 전송, Grafana 대시보드(ID 4026 등)로 시각화
+- Jenkins Pipeline에 JMeter 부하테스트 단계 통합 (배포 직후 자동 실행)
+- `fastapi-app` 컨테이너에 메모리/CPU 제한을 걸어 한계점 테스트
+- **부하 테스트로 실제 동시성 버그 발견**: 동시 요청이 몰리면 `todo.json`이 손상되어 에러율 67.79% 발생 → `threading.Lock` + 원자적 파일 교체(`os.replace`)로 수정, 같은 부하에서 에러율 0%로 확인 (회귀 테스트 추가)
+- 앱 기능: `prompt()`/`confirm()` 기반 수정 UX를 인라인 편집 + 토스트 알림으로 교체
+
 ## 버전 현황
 
 | 버전 | 날짜 | 주차 | 주요 내용 |
 |---|---|---|---|
+| [v7.0.0](https://github.com/oh130/FastApi-Todos/releases/tag/v7.0.0) | 진행 중 | 7주차 | JMeter 부하테스트, InfluxDB, 동시성 버그 수정, 인라인 편집 |
+| [v6.0.0](https://github.com/oh130/FastApi-Todos/releases/tag/v6.0.0) | 2026-11-07 | 6주차 | Prometheus/Grafana 모니터링, 비즈니스 지표 |
+| [v5.1.0](https://github.com/oh130/FastApi-Todos/releases/tag/v5.1.0) | 2026-10-07 | 5주차 | SonarQube 2차 분석, 발견사항 수정 |
+| [v5.0.0](https://github.com/oh130/FastApi-Todos/releases/tag/v5.0.0) | 2026-10-07 | 5주차 | SonarQube 연동, OWASP Top 10 분석, UI 리디자인 |
 | [v4.0.0](https://github.com/oh130/FastApi-Todos/releases/tag/v4.0.0) | 2026-09-30 | 4주차 | pytest/coverage, CI 테스트 게이트, 완료 항목 일괄삭제 |
 | [v3.0.0](https://github.com/oh130/FastApi-Todos/releases/tag/v3.0.0) | 2026-09-23 | 3주차 | Docker/DockerHub 배포, 다크모드 |
 | [v2.0.0](https://github.com/oh130/FastApi-Todos/releases/tag/v2.0.0) | 2026-09-16 | 2주차 | Jenkins CI/CD, 우선순위·마감일 |
@@ -50,14 +75,19 @@ FastAPI로 만든 간단한 To-do List 앱입니다. 매주 데브옵스 수업�
 App/
 ├── CHANGELOG.md
 ├── README.md
-├── docker-compose.yml
+├── SECURITY_OWASP_REVIEW.md     # Claude Code OWASP Top 10 / SonarQube 분석 결과
+├── docker-compose.yml           # fastapi-app, jmeter, influxdb, sonarqube, prometheus, grafana, node-exporter
+├── .env.example                 # Grafana 관리자 비밀번호 등 (.env로 복사해서 사용, git에 안 올라감)
 ├── ci/                          # Jenkins Pipeline 스크립트 (참고용, 실제 설정은 Jenkins Job에 붙여넣음)
+├── prometheus/prometheus.yml    # Prometheus 스크레이프 설정
+├── jmeter/                      # JMeter Dockerfile + 부하테스트 시나리오(.jmx)
 └── fastapi-app/
     ├── main.py                  # FastAPI 앱
     ├── todo.json                # 데이터 저장 파일
     ├── requirements.txt         # 운영 의존성
     ├── requirements-dev.txt     # UI 테스트 전용 의존성 (playwright)
     ├── pyproject.toml           # pytest 설정
+    ├── sonar-project.properties # SonarQube 분석 설정
     ├── Dockerfile / .dockerignore
     ├── templates/index.html     # 프론트엔드
     ├── tests/                   # 단위 테스트 (TestClient)
