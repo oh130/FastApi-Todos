@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>To-Do List v5.0.0</title>
+  <title>To-Do List v7.0.0</title>
   <style>
     :root {
       --page-bg: #f2f3f7;
@@ -206,6 +206,28 @@
     .row-actions button:hover { border-color: var(--accent); color: var(--accent); }
     .row-actions button.danger:hover { border-color: var(--error-fg); color: var(--error-fg); }
 
+    .edit-row { flex-wrap: wrap; }
+    .edit-row input[type="text"] { flex: 1 1 8rem; }
+    .edit-row select, .edit-row input[type="date"] { flex: 0 1 8rem; }
+    .edit-actions { display: flex; gap: .4rem; margin-left: auto; }
+    .save-btn {
+      background: var(--accent);
+      color: var(--accent-fg);
+      border: none;
+      border-radius: .5rem;
+      padding: .35rem .7rem;
+      font-size: .8rem;
+      font-weight: 600;
+    }
+    .cancel-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: .5rem;
+      padding: .35rem .7rem;
+      font-size: .8rem;
+    }
+
     .empty-state {
       text-align: center;
       color: var(--muted);
@@ -213,17 +235,41 @@
       padding: 2rem 0;
     }
 
+    .toast-container {
+      position: fixed;
+      bottom: 1.25rem;
+      right: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: .5rem;
+      z-index: 1000;
+    }
+    .toast {
+      background: var(--fg);
+      color: var(--surface);
+      padding: .6rem 1rem;
+      border-radius: .6rem;
+      font-size: .85rem;
+      box-shadow: var(--shadow);
+      opacity: 0;
+      transform: translateY(.5rem);
+      transition: opacity .2s ease, transform .2s ease;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.toast-error { background: var(--error-fg); color: #fff; }
+
     @media (max-width: 480px) {
       .card { padding: 1.25rem; border-radius: .75rem; }
       .filters { flex-direction: column; align-items: stretch; }
       .btn-ghost { margin-left: 0; }
+      .toast-container { left: 1rem; right: 1rem; }
     }
   </style>
 </head>
 <body>
   <div class="card">
     <h1>
-      To-Do List<small>v5.0.0</small>
+      To-Do List<small>v7.0.0</small>
       <button id="theme-toggle" type="button" aria-label="다크모드 전환">🌙 다크모드</button>
     </h1>
     <form id="todo-form" class="add-form">
@@ -245,11 +291,14 @@
     <p id="error" role="alert" hidden></p>
     <ul id="todo-list"></ul>
   </div>
+  <div id="toast-container" class="toast-container"></div>
   <script>
     const $ = (id) => document.getElementById(id);
     const listEl = $("todo-list");
     const errorEl = $("error");
+    const toastContainer = $("toast-container");
     let allTodos = [];
+    let editingId = null;
 
     const root = document.documentElement;
     const themeToggle = $("theme-toggle");
@@ -271,6 +320,19 @@
       try { localStorage.setItem("theme", next); } catch (e) {}
     };
 
+    function showToast(message, type) {
+      const toast = Object.assign(document.createElement("div"), {
+        textContent: message,
+        className: `toast${type === "error" ? " toast-error" : ""}`,
+      });
+      toastContainer.appendChild(toast);
+      requestAnimationFrame(() => toast.classList.add("show"));
+      setTimeout(() => {
+        toast.classList.remove("show");
+        setTimeout(() => toast.remove(), 200);
+      }, 2200);
+    }
+
     async function api(url, method = "GET", body) {
       const response = await fetch(url, body
         ? { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
@@ -279,17 +341,25 @@
       return response.status === 204 ? null : response.json();
     }
 
-    async function run(action, job) {
-      try { await job(); errorEl.hidden = true; }
-      catch (error) { errorEl.textContent = `${action} 실패: ${error.message}`; errorEl.hidden = false; }
+    async function run(action, job, successMessage) {
+      try {
+        await job();
+        errorEl.hidden = true;
+        if (successMessage) showToast(successMessage);
+      } catch (error) {
+        errorEl.textContent = `${action} 실패: ${error.message}`;
+        errorEl.hidden = false;
+        showToast(`${action} 실패`, "error");
+      }
     }
 
     const load = () => run("목록 불러오기", async () => { allTodos = await api("/todos"); render(); });
-    const save = (id, todo) => run("수정", async () => { await api(`/todos/${id}`, "PUT", todo); await load(); });
+    const save = (id, todo, successMessage) =>
+      run("수정", async () => { await api(`/todos/${id}`, "PUT", todo); await load(); }, successMessage);
 
     function makeButton(label, onclick, extraClass) {
       return Object.assign(document.createElement("button"), {
-        textContent: label, onclick, className: extraClass || "",
+        textContent: label, onclick, className: extraClass || "", type: "button",
       });
     }
 
@@ -308,57 +378,94 @@
         return;
       }
 
-      listEl.replaceChildren(...todos.map((todo) => {
-        const check = Object.assign(document.createElement("input"), {
-          type: "checkbox", checked: todo.completed,
-          onchange: () => save(todo.id, { ...todo, completed: check.checked }),
-        });
-        const text = Object.assign(document.createElement("span"), {
-          textContent: todo.description ? `${todo.title} — ${todo.description}` : todo.title,
-          className: `todo-text${todo.completed ? " done" : ""}`,
-        });
-        const priorityLabel = { high: "높음", medium: "보통", low: "낮음" }[todo.priority];
-        const priorityEl = Object.assign(document.createElement("span"), {
-          textContent: priorityLabel,
-          className: `priority priority-${todo.priority}`,
-        });
-        const dueEl = todo.due_date ? Object.assign(document.createElement("span"), {
-          textContent: `🗓 ${todo.due_date}`,
-          className: "due",
-        }) : null;
-        const actions = Object.assign(document.createElement("div"), { className: "row-actions" });
-        actions.append(
-          makeButton("Edit", () => edit(todo)),
-          makeButton("Delete", () => remove(todo.id), "danger"),
-        );
-        const item = document.createElement("li");
-        item.append(check, text, priorityEl);
-        if (dueEl) item.append(dueEl);
-        item.append(actions);
-        return item;
-      }));
+      listEl.replaceChildren(...todos.map((todo) =>
+        todo.id === editingId ? renderEditRow(todo) : renderRow(todo)
+      ));
     }
 
-    function edit(todo) {
-      const title = prompt("새 제목:", todo.title);
-      if (title === null) return;
-      const description = prompt("새 설명:", todo.description);
-      if (description === null) return;
-      const priority = prompt("우선순위 (high / medium / low):", todo.priority);
-      if (priority === null) return;
-      if (!["high", "medium", "low"].includes(priority.trim())) {
-        errorEl.textContent = "수정 실패: 우선순위는 high, medium, low 중 하나여야 합니다.";
-        errorEl.hidden = false;
-        return;
+    function renderRow(todo) {
+      const check = Object.assign(document.createElement("input"), {
+        type: "checkbox", checked: todo.completed,
+        onchange: () => save(
+          todo.id, { ...todo, completed: check.checked },
+          check.checked ? "완료 처리했습니다." : "진행 중으로 변경했습니다."
+        ),
+      });
+      const text = Object.assign(document.createElement("span"), {
+        textContent: todo.description ? `${todo.title} — ${todo.description}` : todo.title,
+        className: `todo-text${todo.completed ? " done" : ""}`,
+      });
+      const priorityLabel = { high: "높음", medium: "보통", low: "낮음" }[todo.priority];
+      const priorityEl = Object.assign(document.createElement("span"), {
+        textContent: priorityLabel,
+        className: `priority priority-${todo.priority}`,
+      });
+      const dueEl = todo.due_date ? Object.assign(document.createElement("span"), {
+        textContent: `🗓 ${todo.due_date}`,
+        className: "due",
+      }) : null;
+      const actions = Object.assign(document.createElement("div"), { className: "row-actions" });
+      actions.append(
+        makeButton("Edit", () => { editingId = todo.id; render(); }),
+        makeButton("Delete", () => remove(todo.id), "danger"),
+      );
+      const item = document.createElement("li");
+      item.append(check, text, priorityEl);
+      if (dueEl) item.append(dueEl);
+      item.append(actions);
+      return item;
+    }
+
+    function renderEditRow(todo) {
+      const item = document.createElement("li");
+      item.className = "edit-row";
+
+      const titleInput = Object.assign(document.createElement("input"), {
+        type: "text", value: todo.title, "aria-label": "제목 수정",
+      });
+      const descInput = Object.assign(document.createElement("input"), {
+        type: "text", value: todo.description, "aria-label": "설명 수정",
+      });
+      const prioritySelect = document.createElement("select");
+      prioritySelect.setAttribute("aria-label", "우선순위 수정");
+      for (const [value, label] of Object.entries({ high: "높음", medium: "보통", low: "낮음" })) {
+        prioritySelect.appendChild(Object.assign(document.createElement("option"), {
+          value, textContent: label, selected: value === todo.priority,
+        }));
       }
-      const dueDate = prompt("마감일 (YYYY-MM-DD, 비우면 없음):", todo.due_date || "");
-      if (dueDate === null) return;
-      save(todo.id, { ...todo, title: title.trim(), description: description.trim(), priority: priority.trim(), due_date: dueDate.trim() || null });
+      const dueInput = Object.assign(document.createElement("input"), {
+        type: "date", value: todo.due_date || "", "aria-label": "마감일 수정",
+      });
+
+      function submit() {
+        const title = titleInput.value.trim();
+        if (!title) {
+          showToast("제목을 입력해주세요.", "error");
+          return;
+        }
+        editingId = null;
+        save(todo.id, {
+          ...todo,
+          title,
+          description: descInput.value.trim(),
+          priority: prioritySelect.value,
+          due_date: dueInput.value || null,
+        }, "수정했습니다.");
+      }
+
+      const actions = Object.assign(document.createElement("div"), { className: "edit-actions" });
+      actions.append(
+        makeButton("저장", submit, "save-btn"),
+        makeButton("취소", () => { editingId = null; render(); }, "cancel-btn"),
+      );
+
+      item.append(titleInput, descInput, prioritySelect, dueInput, actions);
+      return item;
     }
 
     function remove(id) {
       if (!confirm("정말 삭제할까요?")) return;
-      run("삭제", async () => { await api(`/todos/${id}`, "DELETE"); await load(); });
+      run("삭제", async () => { await api(`/todos/${id}`, "DELETE"); await load(); }, "삭제했습니다.");
     }
 
     $("todo-form").onsubmit = (event) => {
@@ -372,13 +479,13 @@
         });
         event.target.reset();
         await load();
-      });
+      }, "항목을 추가했습니다.");
     };
     $("status-filter").onchange = render;
     $("priority-filter").onchange = render;
     $("clear-completed").onclick = () => {
       if (!confirm("완료된 항목을 모두 삭제할까요?")) return;
-      run("완료 항목 일괄삭제", async () => { await api("/todos/completed", "DELETE"); await load(); });
+      run("완료 항목 일괄삭제", async () => { await api("/todos/completed", "DELETE"); await load(); }, "완료 항목을 삭제했습니다.");
     };
     load();
   </script>
