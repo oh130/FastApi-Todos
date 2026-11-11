@@ -6,6 +6,8 @@ services:
     container_name: fastapi-app-sogang017
     ports:
       - "5017:8000"
+    environment:
+      - PYTHONUNBUFFERED=1        # 로그를 버퍼링 없이 바로 stdout으로 출력
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -103,6 +105,36 @@ services:
     networks:
       - loadtest-net
 
+  loki:
+    image: grafana/loki:3.7.9
+    container_name: loki-sogang017
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "127.0.0.1:3117:3100"   # 인증 없음 — 외부 노출 금지, SSH 터널로 접속
+    volumes:
+      - loki-data:/loki
+    networks:
+      - loadtest-net
+
+  alloy:
+    image: grafana/alloy:v1.21.3
+    container_name: alloy-sogang017
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    ports:
+      - "127.0.0.1:12417:12345"   # Alloy UI, 외부 노출 금지
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy-data:/var/lib/alloy/data
+    depends_on:
+      - loki
+    networks:
+      - loadtest-net
+
 networks:
   loadtest-net:
     driver: bridge
@@ -115,3 +147,5 @@ volumes:
   prometheus-data:
   grafana-data:
   influxdb-data:
+  loki-data:
+  alloy-data:

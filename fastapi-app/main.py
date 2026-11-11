@@ -1,12 +1,15 @@
 import json
+import logging
 import os
+import sys
 import threading
 import time
 from datetime import date
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+import psutil
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from prometheus_client import Counter, Gauge
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -33,6 +36,38 @@ TODO_COMPLETED = Counter("todo_completed_total", "Total number of to-do items ma
 TODO_DELETED = Counter("todo_deleted_total", "Total number of to-do items deleted")
 TODO_ITEMS_CURRENT = Gauge("todo_items_current", "Current number of to-do items by status", ["status"])
 
+# 애플리케이션 로그: Docker가 stdout을 컨테이너 로그로 저장하고, Alloy가 읽어서 Loki로 전송한다.
+# uvicorn 기본 액세스 로그는 끈다 (켜두면 요청 1건당 로그가 2줄씩 찍혀 대시보드 카운트가 2배가 됨).
+custom_logger = logging.getLogger("custom.access")
+custom_logger.setLevel(logging.DEBUG)
+_log_handler = logging.StreamHandler(sys.stdout)
+_log_handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
+custom_logger.addHandler(_log_handler)
+custom_logger.propagate = False
+logging.getLogger("uvicorn.access").disabled = True
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration = time.perf_counter() - start
+    client = request.client.host if request.client else "-"
+    # 로깅 시점의 자원 사용률(psutil)을 모든 접속 로그에 같이 기록한다.
+    cpu = psutil.cpu_percent(interval=None)
+    mem = psutil.virtual_memory().percent
+    line = (
+        f'{client} - "{request.method} {request.url.path} HTTP/1.1" '
+        f"{response.status_code} {duration:.3f}s cpu={cpu:.1f}% mem={mem:.1f}%"
+    )
+    if response.status_code >= 500:
+        custom_logger.error(line)
+    elif response.status_code >= 400:
+        custom_logger.warning(line)
+    else:
+        custom_logger.info(line)
+    return response
+
 
 @app.middleware("http")
 async def add_security_headers(request, call_next):
@@ -57,7 +92,9 @@ class TodoItem(TodoIn):
 
 def load_todos() -> list[TodoItem]:
     raw = TODO_FILE.read_text(encoding="utf-8") if TODO_FILE.exists() else "[]"
-    return [TodoItem(**todo) for todo in json.loads(raw)]
+    todos = [TodoItem(**todo) for todo in json.loads(raw)]
+    custom_logger.debug(f"load_todos: {len(todos)}건 로드")
+    return todos
 
 
 def save_todos(todos: list[TodoItem]) -> None:
@@ -85,6 +122,7 @@ def find_index(todos: list[TodoItem], todo_id: int) -> int:
     for index, todo in enumerate(todos):
         if todo.id == todo_id:
             return index
+    custom_logger.warning(f"find_index: id={todo_id} 를 찾을 수 없음")
     raise HTTPException(status_code=404, detail="To-Do item not found")
 
 

@@ -7,3 +7,4 @@ pytest-html>=4.2.0
 httpx2>=2.13.1
 prometheus-fastapi-instrumentator>=8.1.0
 prometheus-client>=0.26.0
+psutil>=6.1.0
