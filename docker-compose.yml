@@ -3,7 +3,7 @@ services:
     build:
       context: ./fastapi-app
       dockerfile: Dockerfile
-    container_name: fastapi-app-sogang017
+    container_name: fastapi-app-compose-sogang017
     ports:
       - "5017:8000"
     environment:
