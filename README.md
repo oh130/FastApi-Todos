@@ -49,7 +49,7 @@ FastAPI로 만든 간단한 To-do List 앱입니다. 매주 데브옵스 수업�
 - `/metrics` 엔드포인트 재노출, Grafana에 Node Exporter Full(ID 1860)·cAdvisor(ID 13946) 대시보드 연동
 - 앱 기능: To-do 앱 고유의 Prometheus 비즈니스 지표 추가 (`todo_created_total`, `todo_completed_total`, `todo_deleted_total`, `todo_items_current`)
 
-### Week 7 — 부하 테스트: JMeter & InfluxDB (v7.0.0, 진행 중)
+### Week 7 — 부하 테스트: JMeter & InfluxDB (v7.0.0, 2026-11-07)
 - JMeter 테스트 플랜 작성(초기화면/조회/등록/수정/삭제 5개 엔드포인트), 전용 Docker 이미지로 패키징
 - InfluxDB 추가 + JMeter Backend Listener로 부하테스트 결과를 실시간 전송, Grafana 대시보드(ID 4026 등)로 시각화
 - Jenkins Pipeline에 JMeter 부하테스트 단계 통합 (배포 직후 자동 실행)
@@ -57,11 +57,20 @@ FastAPI로 만든 간단한 To-do List 앱입니다. 매주 데브옵스 수업�
 - **부하 테스트로 실제 동시성 버그 발견**: 동시 요청이 몰리면 `todo.json`이 손상되어 에러율 67.79% 발생 → `threading.Lock` + 원자적 파일 교체(`os.replace`)로 수정, 같은 부하에서 에러율 0%로 확인 (회귀 테스트 추가)
 - 앱 기능: `prompt()`/`confirm()` 기반 수정 UX를 인라인 편집 + 토스트 알림으로 교체
 
+### Week 8 — 로그 수집: Grafana Loki & Alloy (v8.0.0, 2026-11-11)
+- `docker-compose.yml`에 Grafana Loki + Grafana Alloy 추가 (Promtail은 EOL이라 공식 후속인 Alloy 사용)
+- Alloy가 Docker 소켓으로 `fastapi-app` 컨테이너 로그를 읽어 Loki로 전송하도록 파이프라인 구성 (`alloy/config.alloy`)
+- 요청 로그를 DEBUG/INFO/WARNING/ERROR 4단계로 남기도록 미들웨어 추가, 모든 로그에 `psutil` CPU/메모리 사용률 같이 기록 (메트릭-로그 상관 분석용)
+- Grafana에 커스텀 대시보드("Counting Requests Per Path")와 커뮤니티 대시보드(ID 12611, "Logging Dashboard via Loki") 연동
+- `fastapi-app` 컨테이너 이름이 Jenkins 배포 컨테이너와 충돌하던 문제 수정 (`fastapi-app-sogang017` → `fastapi-app-compose-sogang017`)
+- 앱 기능: To-Do 목록에 제목/설명 키워드 검색 필터 추가
+
 ## 버전 현황
 
 | 버전 | 날짜 | 주차 | 주요 내용 |
 |---|---|---|---|
-| [v7.0.0](https://github.com/oh130/FastApi-Todos/releases/tag/v7.0.0) | 진행 중 | 7주차 | JMeter 부하테스트, InfluxDB, 동시성 버그 수정, 인라인 편집 |
+| [v8.0.0](https://github.com/oh130/FastApi-Todos/releases/tag/v8.0.0) | 2026-11-11 | 8주차 | Grafana Loki/Alloy 로그 수집, 컨테이너 이름 충돌 수정, 검색 필터 |
+| [v7.0.0](https://github.com/oh130/FastApi-Todos/releases/tag/v7.0.0) | 2026-11-07 | 7주차 | JMeter 부하테스트, InfluxDB, 동시성 버그 수정, 인라인 편집 |
 | [v6.0.0](https://github.com/oh130/FastApi-Todos/releases/tag/v6.0.0) | 2026-11-07 | 6주차 | Prometheus/Grafana 모니터링, 비즈니스 지표 |
 | [v5.1.0](https://github.com/oh130/FastApi-Todos/releases/tag/v5.1.0) | 2026-10-07 | 5주차 | SonarQube 2차 분석, 발견사항 수정 |
 | [v5.0.0](https://github.com/oh130/FastApi-Todos/releases/tag/v5.0.0) | 2026-10-07 | 5주차 | SonarQube 연동, OWASP Top 10 분석, UI 리디자인 |
@@ -76,11 +85,12 @@ App/
 ├── CHANGELOG.md
 ├── README.md
 ├── SECURITY_OWASP_REVIEW.md     # Claude Code OWASP Top 10 / SonarQube 분석 결과
-├── docker-compose.yml           # fastapi-app, jmeter, influxdb, sonarqube, prometheus, grafana, node-exporter
+├── docker-compose.yml           # fastapi-app, jmeter, influxdb, sonarqube, prometheus, grafana, node-exporter, loki, alloy
 ├── .env.example                 # Grafana 관리자 비밀번호 등 (.env로 복사해서 사용, git에 안 올라감)
 ├── ci/                          # Jenkins Pipeline 스크립트 (참고용, 실제 설정은 Jenkins Job에 붙여넣음)
 ├── prometheus/prometheus.yml    # Prometheus 스크레이프 설정
 ├── jmeter/                      # JMeter Dockerfile + 부하테스트 시나리오(.jmx)
+├── alloy/config.alloy           # Grafana Alloy 로그 수집 파이프라인 설정
 └── fastapi-app/
     ├── main.py                  # FastAPI 앱
     ├── todo.json                # 데이터 저장 파일
