@@ -2,8 +2,6 @@
 
 FastAPI로 만든 간단한 To-do List 앱입니다. 매주 데브옵스 수업에서 배운 내용을 이 프로젝트에 실제로 적용해가며 발전시키고 있어서, 앱 기능 변경 이력이 곧 수업 진도 기록이기도 합니다. 상세한 기능 변경 내역은 [CHANGELOG.md](CHANGELOG.md), GitHub Release([링크](https://github.com/oh130/FastApi-Todos/releases))를 참고하세요.
 
-> Week 0(Git 이전에 한 주가 더 있었는지)은 이 레포 기록만으로는 확인이 안 돼서 비워뒀습니다. 있었다면 내용 채워 넣으면 됩니다.
-
 ## 주차별 진행 기록
 
 ### Week 1 — 기본 앱 & Git (2026-09-09)
