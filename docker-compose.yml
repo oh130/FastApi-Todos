@@ -105,6 +105,22 @@ services:
     networks:
       - loadtest-net
 
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v0.60.6
+    container_name: cadvisor-sogang017
+    # 컨테이너별 리소스 통계를 읽으려면 호스트 cgroup/도커 상태에 read-only로 접근해야 해서
+    # 다른 서비스처럼 cap_drop/read_only를 걸 수 없음 (cAdvisor 자체 제약).
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    ports:
+      - "127.0.0.1:7217:8080"   # 인증 없음 — 외부 노출 금지
+    networks:
+      - loadtest-net
+
   loki:
     image: grafana/loki:3.7.9
     container_name: loki-sogang017
