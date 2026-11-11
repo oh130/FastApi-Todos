@@ -1,5 +1,13 @@
 # Release notes
 
+## v8.0.0 — 2026-11-11
+
+- Grafana Loki + Grafana Alloy 로그 수집 스택을 추가했습니다 (Promtail은 EOL이라 공식 후속인 Alloy를 사용했습니다). Alloy가 Docker 소켓으로 `fastapi-app` 컨테이너의 stdout/stderr 로그를 읽어 Loki로 전송합니다.
+- 애플리케이션 로그를 DEBUG/INFO/WARNING/ERROR 4단계로 남기도록 미들웨어를 추가했습니다. 모든 요청 로그에 `psutil`로 측정한 CPU/메모리 사용률을 같이 기록해 메트릭과 로그를 한 줄에서 상관 분석할 수 있게 했습니다.
+- Grafana에 커스텀 대시보드("Counting Requests Per Path")와 커뮤니티 대시보드(ID 12611, "Logging Dashboard via Loki")를 연동했습니다. 전자는 요청 경로별 카운트, 후자는 실시간 로그 뷰·로그 레벨별 비율 등을 보여줍니다.
+- docker-compose의 `fastapi-app` 컨테이너 이름이 Jenkins 배포 컨테이너와 충돌하던 문제를 수정했습니다 (`fastapi-app-sogang017` → `fastapi-app-compose-sogang017`).
+- 앱 기능: To-Do 목록에 제목/설명 키워드 검색 필터를 추가했습니다 (기존 상태·우선순위 필터와 함께 적용).
+
 ## v7.0.0 — 2026-11-07
 
 - JMeter 부하 테스트 시나리오(초기화면/조회/등록/수정/삭제 5개 엔드포인트)를 추가하고, 결과를 InfluxDB로 전송해 Grafana 대시보드로 시각화했습니다.
