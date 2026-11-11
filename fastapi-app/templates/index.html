@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>To-Do List v7.0.0</title>
+  <title>To-Do List v8.0.0</title>
   <style>
     :root {
       --page-bg: #f2f3f7;
@@ -269,7 +269,7 @@
 <body>
   <div class="card">
     <h1>
-      To-Do List<small>v7.0.0</small>
+      To-Do List<small>v8.0.0</small>
       <button id="theme-toggle" type="button" aria-label="다크모드 전환">🌙 다크모드</button>
     </h1>
     <form id="todo-form" class="add-form">
@@ -286,6 +286,7 @@
     <div class="filters">
       <label>상태 <select id="status-filter"><option value="all">전체</option><option value="active">진행 중</option><option value="completed">완료</option></select></label>
       <label>우선순위 <select id="priority-filter"><option value="all">전체</option><option value="high">높음</option><option value="medium">보통</option><option value="low">낮음</option></select></label>
+      <label>검색 <input type="text" id="search-filter" placeholder="제목/설명 검색"></label>
       <button id="clear-completed" type="button" class="btn-ghost">완료 항목 일괄삭제</button>
     </div>
     <p id="error" role="alert" hidden></p>
@@ -366,9 +367,11 @@
     function render() {
       const status = $("status-filter").value;
       const priority = $("priority-filter").value;
+      const keyword = $("search-filter").value.trim().toLowerCase();
       const todos = allTodos.filter((todo) =>
         (status === "all" || (status === "completed" ? todo.completed : !todo.completed)) &&
-        (priority === "all" || todo.priority === priority)
+        (priority === "all" || todo.priority === priority) &&
+        (!keyword || todo.title.toLowerCase().includes(keyword) || todo.description.toLowerCase().includes(keyword))
       );
 
       if (todos.length === 0) {
@@ -483,6 +486,7 @@
     };
     $("status-filter").onchange = render;
     $("priority-filter").onchange = render;
+    $("search-filter").oninput = render;
     $("clear-completed").onclick = () => {
       if (!confirm("완료된 항목을 모두 삭제할까요?")) return;
       run("완료 항목 일괄삭제", async () => { await api("/todos/completed", "DELETE"); await load(); }, "완료 항목을 삭제했습니다.");
