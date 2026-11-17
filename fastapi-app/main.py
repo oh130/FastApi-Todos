@@ -16,7 +16,9 @@ from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, Field
 
 BASE_DIR = Path(__file__).resolve().parent
-TODO_FILE = BASE_DIR / "todo.json"
+# 저장 파일 경로는 환경변수 TODO_FILE로 바꿀 수 있다. 기본값은 기존과 같은 앱 폴더의 todo.json이라 compose 배포는 그대로다.
+# 쿠버네티스에서는 이 경로를 영속 볼륨(PVC) 마운트 위치로 지정해서, 파드가 재시작돼도 데이터가 남게 한다.
+TODO_FILE = Path(os.environ.get("TODO_FILE", BASE_DIR / "todo.json"))
 INDEX_FILE = BASE_DIR / "templates" / "index.html"
 
 if not TODO_FILE.exists():
