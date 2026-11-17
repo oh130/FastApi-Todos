@@ -1,0 +1,100 @@
+# FastApi-Todos를 쿠버네티스에 올리는 실습용 매니페스트.
+# docker-compose.yml에서 하던 설정이 쿠버네티스의 어떤 항목으로 옮겨 가는지 주석으로 표시했다.
+
+# 영속 볼륨 요청(PVC): "디스크 1Gi를 달라"는 신청서. 파드가 지워져도 이 디스크와 안의 데이터는 남는다.
+# compose의 named volume(예: grafana-data)에 해당한다.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: todo-data
+spec:
+  accessModes: ["ReadWriteOnce"]   # 한 노드에서 읽고 쓰기
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fastapi-todo
+spec:
+  # todo.json(파일)에 저장하는 구조라 복제본은 1개로 둔다.
+  # 2개 이상이면 파드마다 자기 파일을 따로 가져서 데이터가 갈라진다 (k8s/README.md 실험 2).
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fastapi-todo
+  template:
+    metadata:
+      labels:
+        app: fastapi-todo
+    spec:
+      # 컨테이너는 non-root(uid 10001)로 도는데, 새 볼륨은 root 소유라 쓸 수 없다.
+      # fsGroup을 지정하면 볼륨이 그 그룹으로 마운트되어 앱이 /data에 쓸 수 있다.
+      securityContext:
+        fsGroup: 10001
+      volumes:
+        - name: todo-data
+          persistentVolumeClaim:
+            claimName: todo-data
+      containers:
+        - name: fastapi-app
+          # 로컬에서 빌드한 이미지 (README의 준비 단계).
+          # 같은 태그로 다시 빌드하면 노드에 캐시된 옛 이미지가 계속 쓰이므로, 코드를 바꿀 때마다 태그를 바꾼다.
+          image: fastapi-todo:pvc
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: PYTHONUNBUFFERED   # compose의 environment와 동일
+              value: "1"
+            - name: TODO_FILE          # 데이터 파일을 영속 볼륨 위에 둔다 (아래 PVC)
+              value: /data/todo.json
+          volumeMounts:
+            - name: todo-data
+              mountPath: /data
+          # compose의 mem_limit: 128m / cpus: 0.5 (부하테스트로 한계점을 보려고 건 제약)를 그대로 옮김.
+          # 메모리 한도를 넘으면 컨테이너가 OOMKilled 된다 (README 실험 3).
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          # compose에는 restart 정책만 있고 헬스체크가 없었다.
+          # readiness: 통과해야 Service가 트래픽을 보낸다. liveness: 실패하면 컨테이너를 재시작한다.
+          readinessProbe:
+            httpGet:
+              path: /todos
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          # compose의 security_opt(no-new-privileges), cap_drop: ALL, Dockerfile의 non-root 유저(uid 10001)에 대응.
+          # 앱이 todo.json을 쓰므로 readOnlyRootFilesystem은 켜지 않는다.
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 10001
+            capabilities:
+              drop: ["ALL"]
+---
+# 파드는 죽고 다시 뜰 때마다 IP가 바뀌므로, 고정된 접속 주소(fastapi-todo:8000)를 만들어 주는 Service.
+# 클러스터 안에서만 쓰는 ClusterIP다. 내 PC에서는 kubectl port-forward로 접속한다 (README 참고).
+apiVersion: v1
+kind: Service
+metadata:
+  name: fastapi-todo
+spec:
+  type: ClusterIP
+  selector:
+    app: fastapi-todo
+  ports:
+    - port: 8000
+      targetPort: 8000
