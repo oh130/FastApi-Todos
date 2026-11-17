@@ -63,6 +63,23 @@ FastAPI로 만든 간단한 To-do List 앱입니다. 매주 데브옵스 수업�
 - `fastapi-app` 컨테이너 이름이 Jenkins 배포 컨테이너와 충돌하던 문제 수정 (`fastapi-app-sogang017` → `fastapi-app-compose-sogang017`)
 - 앱 기능: To-Do 목록에 제목/설명 키워드 검색 필터 추가
 
+### 쿠버네티스 — 로컬 클러스터 실습 (2026-11-17)
+- Docker Desktop 내장 쿠버네티스(kind 모드, 노드 1개)에 앱을 올려, compose에서 하던 설정을 쿠버네티스 방식으로 옮겨 봄 → 매니페스트와 실험 기록은 [k8s/](k8s/README.md)
+  - Deployment + Service(ClusterIP, `kubectl port-forward`로 접속)
+  - `resources.limits`: compose의 `mem_limit: 128m`, `cpus: 0.5` 대응
+  - readiness/liveness probe, `securityContext`(non-root, 권한 상승 금지, capability 전체 제거)
+  - PVC(1Gi)를 `/data`에 마운트해 데이터를 파드 밖에 저장
+- 실제로 실행해서 확인한 동작
+  - 파드를 삭제하면 Deployment가 새 파드를 띄워 자동 복구
+  - 메모리 한도를 20Mi로 낮추면 새 파드는 OOMKilled → CrashLoopBackOff, 기존 파드는 계속 `Running`이라 서비스는 유지 (롤링 업데이트)
+  - 이미지 태그 변경 후 롤링 업데이트, `rollout undo`로 롤백
+  - 볼륨 없이 복제본 2개: 파드마다 `todo.json`을 따로 가져 조회 결과가 갈라짐 (5건 / 3건)
+  - PVC 적용 후 파드를 삭제해도 데이터 유지
+  - PVC를 공유하는 복제본 2개에 동시 POST 40건: 13건 유실. `main.py`의 락(`threading.Lock`)이 프로세스 안에서만 유효해서 파드 사이의 동시 쓰기를 막지 못함 → 파일 저장 방식은 복제본 1개 전제, 늘리려면 DB 필요
+  - 같은 태그로 이미지를 다시 빌드하면 노드에 캐시된 옛 이미지가 계속 쓰이는 문제 확인 (태그를 바꿔서 해결)
+- 앱 변경: 저장 파일 경로를 환경변수 `TODO_FILE`로 지정할 수 있게 함 (기본값은 기존 `todo.json`이라 compose 배포는 그대로)
+- 로컬 클러스터에서만 실습했고, 서버에는 배포하지 않음. HPA와 클러스터 대상 부하테스트는 해보지 않음
+
 ## 버전 현황
 
 | 버전 | 날짜 | 주요 내용 |
@@ -89,9 +106,10 @@ App/
 ├── prometheus/prometheus.yml    # Prometheus 스크레이프 설정
 ├── jmeter/                      # JMeter Dockerfile + 부하테스트 시나리오(.jmx)
 ├── alloy/config.alloy           # Grafana Alloy 로그 수집 파이프라인 설정
+├── k8s/                         # 로컬 쿠버네티스 실습 (Deployment, Service, PVC) + 실험 기록
 └── fastapi-app/
     ├── main.py                  # FastAPI 앱
-    ├── todo.json                # 데이터 저장 파일
+    ├── todo.json                # 데이터 저장 파일 (환경변수 TODO_FILE로 경로 변경 가능)
     ├── requirements.txt         # 운영 의존성
     ├── requirements-dev.txt     # UI 테스트 전용 의존성 (playwright)
     ├── pyproject.toml           # pytest 설정
@@ -114,6 +132,18 @@ uvicorn main:app --reload
 ```
 
 `http://127.0.0.1:8000` 접속.
+
+## 쿠버네티스 로컬 실행
+
+Docker Desktop의 Settings > Kubernetes에서 Enable 한 뒤:
+
+```bash
+docker build -t fastapi-todo:pvc ./fastapi-app
+kubectl apply -f k8s/fastapi-todo.yaml
+kubectl port-forward svc/fastapi-todo 8000:8000   # http://localhost:8000
+```
+
+실험 방법과 결과는 [k8s/README.md](k8s/README.md)를 참고하세요.
 
 ## 테스트 실행
 
