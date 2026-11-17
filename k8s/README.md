@@ -1,0 +1,120 @@
+# 쿠버네티스 실습 (로컬)
+
+docker-compose로 돌리던 FastAPI 앱을 로컬 쿠버네티스(Docker Desktop 내장, kind 모드)에 올려 보는 실습이다.
+운영 배포용이 아니라, compose에서 하던 설정이 쿠버네티스에서 어떻게 표현되는지 확인하는 것이 목적이다.
+
+## compose 설정과의 대응
+
+| compose (`docker-compose.yml`, `Dockerfile`) | 쿠버네티스 (`fastapi-todo.yaml`) |
+| --- | --- |
+| `restart: unless-stopped` | Deployment가 파드 수를 유지 (죽으면 새로 띄움) |
+| `ports: "5017:8000"` | Service (+ `kubectl port-forward`) |
+| `mem_limit: 128m`, `cpus: 0.5` | `resources.limits` (memory 128Mi, cpu 500m) |
+| named volume (예: `grafana-data`) | PVC (`todo-data`) |
+| (없음) | `readinessProbe`, `livenessProbe` |
+| `no-new-privileges`, `cap_drop: ALL`, non-root 유저 | `securityContext` |
+
+## 준비
+
+Docker Desktop의 Settings > Kubernetes에서 Enable. 클러스터가 뜨면:
+
+```bash
+docker build -t fastapi-todo:pvc ./fastapi-app
+kubectl apply -f k8s/fastapi-todo.yaml
+kubectl get pods,pvc
+kubectl port-forward svc/fastapi-todo 8000:8000   # 브라우저에서 http://localhost:8000
+```
+
+이 클러스터는 kind 모드라 NodePort로 `localhost`에 바로 접속되지 않아서 `port-forward`를 쓴다.
+로컬에서 빌드한 이미지는 같은 Docker Desktop 클러스터에서 그대로 쓸 수 있었다.
+
+주의: 같은 태그(`:local`)로 이미지를 다시 빌드해서 `apply`하면 노드에 캐시된 옛 이미지가 계속 쓰인다.
+실제로 코드를 고쳤는데도 파드가 옛 코드로 도는 것을 겪었다(`kubectl get pod -o jsonpath='{..imageID}'`로 이미지 해시를 비교해서 확인).
+코드를 바꿀 때마다 태그를 바꾸고(`fastapi-todo:pvc` 등) yaml의 `image:`도 같이 바꾼다.
+
+## 실험과 결과
+
+아래는 실제로 실행해서 확인한 결과다.
+
+### 1. 파드를 지우면 자동으로 복구된다
+
+```bash
+kubectl delete pod -l app=fastapi-todo
+kubectl get pods
+```
+
+새 파드가 몇 초 안에 `Running`이 된다. 볼륨을 붙이기 전(컨테이너 안의 `todo.json`을 쓰던 때)에는 새 파드의 데이터가 이미지에 들어 있던 초기 상태로 돌아갔다. 실험 5에서 이 문제를 해결한다.
+
+### 2. 복제본을 2개로 늘리면 데이터가 갈라진다 (볼륨 없이)
+
+```bash
+kubectl scale deployment fastapi-todo --replicas=2
+# 클러스터 안에서 Service 주소로 POST 6번 후 GET을 반복
+kubectl run tester --rm -i --restart=Never --image=curlimages/curl -- sh -c '...'
+```
+
+GET할 때마다 todo 개수가 5건, 3건으로 다르게 나왔다. 요청이 두 파드에 나뉘어 들어가고, 파드마다 자기 `todo.json`을 따로 갖기 때문이다.
+`main.py`의 락(`threading.Lock`)도 프로세스 안에서만 유효해서 파드 사이의 동시성은 막지 못한다.
+상태를 가진 앱은 복제본을 그냥 늘릴 수 없고, DB나 공유 볼륨 같은 외부 저장소로 빼야 한다는 것을 확인했다.
+
+```bash
+kubectl scale deployment fastapi-todo --replicas=1   # 원복
+```
+
+### 3. 메모리 한도를 넘으면 OOMKilled
+
+```bash
+kubectl set resources deployment/fastapi-todo --requests=memory=16Mi --limits=memory=20Mi
+kubectl describe pod <새 파드>   # Last State: Terminated, Reason: OOMKilled, Exit Code: 137
+```
+
+새 파드는 `CrashLoopBackOff`가 되었다. 이때 기존 파드는 계속 `Running`이라 서비스가 끊기지 않았다.
+(롤링 업데이트는 새 파드가 Ready가 되기 전에는 기존 파드를 내리지 않는다.)
+`requests`가 `limits`보다 크면 설정 자체가 거부되므로 둘을 같이 낮춰야 한다.
+
+```bash
+kubectl apply -f k8s/fastapi-todo.yaml   # 원복
+```
+
+### 4. 롤링 업데이트와 롤백
+
+```bash
+docker tag fastapi-todo:local fastapi-todo:v2
+kubectl set image deployment/fastapi-todo fastapi-app=fastapi-todo:v2
+kubectl rollout status deployment/fastapi-todo
+kubectl rollout history deployment/fastapi-todo
+kubectl rollout undo deployment/fastapi-todo
+```
+
+리비전이 1, 2로 기록되고, `undo`로 이전 이미지로 되돌아갔다.
+
+### 5. PVC로 데이터를 파드 밖에 두면 파드를 지워도 남는다
+
+`main.py`가 저장 파일 경로를 환경변수 `TODO_FILE`로 받도록 고쳤다(기본값은 기존과 같은 앱 폴더의 `todo.json`이라 compose 배포는 그대로).
+yaml에서는 PVC(`todo-data`, 1Gi)를 만들어 `/data`에 마운트하고 `TODO_FILE=/data/todo.json`으로 지정했다.
+앱이 non-root(uid 10001)로 돌기 때문에 새 볼륨(root 소유)에 쓰려면 `fsGroup: 10001`이 필요하다.
+
+```bash
+# 할 일을 추가한 뒤
+kubectl delete pod -l app=fastapi-todo
+# 새 파드에서 다시 조회하면 추가한 할 일이 그대로 남아 있다
+```
+
+파드를 지우기 전에 추가한 `persist-1`, `persist-2`가 새 파드에서도 조회되었다.
+
+### 6. 볼륨을 공유해도 복제본을 늘릴 수는 없다
+
+PVC를 붙인 상태에서 복제본을 2개로 늘리고 동시에 POST 40번을 보냈다.
+GET 결과는 매번 29건으로 같았다(실험 2처럼 갈라지지는 않는다). 하지만 기대한 42건에 못 미쳤다. 13건이 사라진 것이다.
+두 파드가 같은 파일을 읽고-수정하고-쓰는데, `main.py`의 락(`threading.Lock`)은 한 프로세스 안에서만 유효해서 파드 사이의 동시 쓰기를 막지 못한다(마지막에 쓴 쪽이 이긴다).
+파일 저장 방식은 복제본 1개를 전제로 한 구조이고, 복제본을 늘리려면 DB처럼 동시성을 처리해 주는 저장소가 필요하다.
+
+```bash
+kubectl scale deployment fastapi-todo --replicas=1   # 원복
+```
+
+## 아직 해보지 않은 것
+
+- HPA (자동 스케일아웃). 실험 6의 이유로 저장소를 DB로 바꾸기 전에는 의미가 없다.
+- JMeter 부하테스트를 클러스터 대상으로 실행.
+- 학교 서버(k3s)에는 올리지 않았다. 로컬 클러스터에서만 실습했다.
