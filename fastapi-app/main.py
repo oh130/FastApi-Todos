@@ -1,36 +1,24 @@
-import json
 import logging
-import os
 import sys
-import threading
 import time
+from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import psutil
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from prometheus_client import Counter, Gauge
 from prometheus_fastapi_instrumentator import Instrumentator
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import delete, func, select
+from sqlalchemy.orm import Session
+
+from database import SessionLocal, TodoRow, init_db
 
 BASE_DIR = Path(__file__).resolve().parent
-# 저장 파일 경로는 환경변수 TODO_FILE로 바꿀 수 있다. 기본값은 기존과 같은 앱 폴더의 todo.json이라 compose 배포는 그대로다.
-# 쿠버네티스에서는 이 경로를 영속 볼륨(PVC) 마운트 위치로 지정해서, 파드가 재시작돼도 데이터가 남게 한다.
-TODO_FILE = Path(os.environ.get("TODO_FILE", BASE_DIR / "todo.json"))
 INDEX_FILE = BASE_DIR / "templates" / "index.html"
-
-if not TODO_FILE.exists():
-    TODO_FILE.write_text("[]", encoding="utf-8")
-
-# todo.json은 동시 요청 간 공유 자원이라, 읽기-수정-쓰기를 이 락으로 직렬화한다.
-# 부하 테스트에서 락 없이 동시 쓰기가 몰리면 파일이 깨지면서(JSONDecodeError) 500이 발생함을 확인했다.
-_todo_lock = threading.Lock()
-
-app = FastAPI(title="To-Do List API")
-
-Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 
 # 비즈니스 지표: HTTP 요청 수와는 별개로 Todo 앱 고유의 상태를 나타내는 지표
 TODO_CREATED = Counter("todo_created_total", "Total number of to-do items created")
@@ -47,6 +35,28 @@ _log_handler.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
 custom_logger.addHandler(_log_handler)
 custom_logger.propagate = False
 logging.getLogger("uvicorn.access").disabled = True
+
+
+def refresh_todo_gauge(session: Session) -> None:
+    # 게이지 값은 메모리에 들고 있지 않고 DB를 직접 세서 맞춘다. 앱이 여러 개여도 모두 같은 DB를 보므로
+    # 어느 앱에서 쓴 변경이든 같은 값을 보고한다.
+    total = session.scalar(select(func.count()).select_from(TodoRow)) or 0
+    completed = session.scalar(select(func.count()).select_from(TodoRow).where(TodoRow.completed.is_(True))) or 0
+    TODO_ITEMS_CURRENT.labels(status="completed").set(completed)
+    TODO_ITEMS_CURRENT.labels(status="active").set(total - completed)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    init_db()
+    with SessionLocal() as session:
+        refresh_todo_gauge(session)
+    yield
+
+
+app = FastAPI(title="To-Do List API", lifespan=lifespan)
+
+Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 
 
 @app.middleware("http")
@@ -89,84 +99,66 @@ class TodoIn(BaseModel):
 
 
 class TodoItem(TodoIn):
+    model_config = ConfigDict(from_attributes=True)  # DB 행(TodoRow)에서 바로 응답 모델을 만들기 위함
+
     id: int
 
 
-def load_todos() -> list[TodoItem]:
-    raw = TODO_FILE.read_text(encoding="utf-8") if TODO_FILE.exists() else "[]"
-    todos = [TodoItem(**todo) for todo in json.loads(raw)]
-    custom_logger.debug(f"load_todos: {len(todos)}건 로드")
-    return todos
+def get_session():
+    # 요청마다 DB 세션을 하나 열고, 응답이 끝나면 닫는다 (연결은 엔진의 연결 풀이 재사용한다).
+    with SessionLocal() as session:
+        yield session
 
 
-def save_todos(todos: list[TodoItem]) -> None:
-    data = json.dumps(
-        [todo.model_dump(mode="json") for todo in todos], indent=2, ensure_ascii=False
-    )
-    tmp_path = TODO_FILE.with_suffix(".json.tmp")
-    tmp_path.write_text(data, encoding="utf-8")
-    for attempt in range(3):
-        try:
-            os.replace(tmp_path, TODO_FILE)  # 원자적 교체: 쓰는 도중 상태의 파일이 노출되지 않음
-            break
-        except PermissionError:
-            # Windows에서 백신 등이 파일을 순간적으로 잠그면 발생할 수 있음(부하테스트로 확인).
-            # Linux 배포 환경에서는 발생하지 않지만 방어적으로 짧게 재시도한다.
-            if attempt == 2:
-                raise
-            time.sleep(0.05)
-    completed_count = sum(1 for todo in todos if todo.completed)
-    TODO_ITEMS_CURRENT.labels(status="completed").set(completed_count)
-    TODO_ITEMS_CURRENT.labels(status="active").set(len(todos) - completed_count)
+SessionDep = Annotated[Session, Depends(get_session)]
 
 
-def find_index(todos: list[TodoItem], todo_id: int) -> int:
-    for index, todo in enumerate(todos):
-        if todo.id == todo_id:
-            return index
-    custom_logger.warning(f"find_index: id={todo_id} 를 찾을 수 없음")
-    raise HTTPException(status_code=404, detail="To-Do item not found")
-
-
-@app.get("/todos")
-def get_todos() -> list[TodoItem]:
-    with _todo_lock:
-        return load_todos()
-
-
-@app.post("/todos", status_code=201)
-def create_todo(payload: TodoIn) -> TodoItem:
-    with _todo_lock:
-        todos = load_todos()
-        new_id = max((todo.id for todo in todos), default=0) + 1
-        todo = TodoItem(id=new_id, **payload.model_dump())
-        save_todos(todos + [todo])
-    TODO_CREATED.inc()
+def get_todo_or_404(session: Session, todo_id: int, *, lock: bool = False) -> TodoRow:
+    # lock=True: SELECT ... FOR UPDATE로 그 행을 잠그고 읽는다. 두 요청이 같은 항목을 동시에 고치면
+    # 뒤 요청은 앞 요청이 끝날 때까지 기다렸다가 갱신된 값을 보고 처리한다 (완료 지표를 정확히 세기 위함).
+    todo = session.get(TodoRow, todo_id, with_for_update=lock)
+    if todo is None:
+        custom_logger.warning(f"get_todo_or_404: id={todo_id} 를 찾을 수 없음")
+        raise HTTPException(status_code=404, detail="To-Do item not found")
     return todo
 
 
+@app.get("/todos")
+def get_todos(session: SessionDep) -> list[TodoItem]:
+    rows = session.scalars(select(TodoRow).order_by(TodoRow.id)).all()
+    custom_logger.debug(f"get_todos: {len(rows)}건 조회")
+    return [TodoItem.model_validate(row) for row in rows]
+
+
+@app.post("/todos", status_code=201)
+def create_todo(payload: TodoIn, session: SessionDep) -> TodoItem:
+    row = TodoRow(**payload.model_dump())
+    session.add(row)
+    session.commit()  # 이 시점에 DB가 id를 발급한다
+    refresh_todo_gauge(session)
+    TODO_CREATED.inc()
+    return TodoItem.model_validate(row)
+
+
 @app.put("/todos/{todo_id}", responses={404: {"description": "To-Do item not found"}})
-def update_todo(todo_id: int, payload: TodoIn) -> TodoItem:
-    with _todo_lock:
-        todos = load_todos()
-        index = find_index(todos, todo_id)
-        just_completed = not todos[index].completed and payload.completed
-        todos[index] = TodoItem(id=todo_id, **payload.model_dump())
-        save_todos(todos)
-        result = todos[index]
+def update_todo(todo_id: int, payload: TodoIn, session: SessionDep) -> TodoItem:
+    row = get_todo_or_404(session, todo_id, lock=True)
+    just_completed = not row.completed and payload.completed
+    for field, value in payload.model_dump().items():
+        setattr(row, field, value)
+    session.commit()
+    refresh_todo_gauge(session)
     if just_completed:
         TODO_COMPLETED.inc()
-    return result
+    return TodoItem.model_validate(row)
 
 
 @app.delete("/todos/completed", status_code=204)
-def delete_completed_todos() -> None:
-    with _todo_lock:
-        todos = load_todos()
-        remaining = [todo for todo in todos if not todo.completed]
-        save_todos(remaining)
-        removed = len(todos) - len(remaining)
-    TODO_DELETED.inc(removed)
+def delete_completed_todos(session: SessionDep) -> None:
+    result = session.execute(delete(TodoRow).where(TodoRow.completed.is_(True)))
+    session.commit()
+    refresh_todo_gauge(session)
+    TODO_DELETED.inc(result.rowcount)
 
 
 @app.delete(
@@ -174,11 +166,11 @@ def delete_completed_todos() -> None:
     status_code=204,
     responses={404: {"description": "To-Do item not found"}},
 )
-def delete_todo(todo_id: int) -> None:
-    with _todo_lock:
-        todos = load_todos()
-        del todos[find_index(todos, todo_id)]
-        save_todos(todos)
+def delete_todo(todo_id: int, session: SessionDep) -> None:
+    row = get_todo_or_404(session, todo_id)
+    session.delete(row)
+    session.commit()
+    refresh_todo_gauge(session)
     TODO_DELETED.inc()
 
 

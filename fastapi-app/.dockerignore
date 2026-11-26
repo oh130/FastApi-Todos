@@ -13,6 +13,8 @@ tests_ui/
 requirements-dev.txt
 pyproject.toml
 .coverage
+todo.db
+todo.json
 htmlcov/
 pytest_report/
 api_test_report/

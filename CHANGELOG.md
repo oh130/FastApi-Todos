@@ -1,5 +1,20 @@
 # Release notes
 
+## v9.0.0 — 2026-11-26
+
+- **데이터 저장소를 파일(`todo.json`)에서 PostgreSQL로 바꿨습니다.** 앱이 여러 개(복제본)일 때 파일 저장 방식은 동시 쓰기가 유실되고 데이터가 갈라졌습니다(쿠버네티스 실험 2, 6). 이제 모든 앱이 같은 DB를 보고, 동시성은 앱의 `threading.Lock` 대신 DB가 처리합니다.
+  - SQLAlchemy 2 + psycopg 3 사용. 접속 주소는 환경변수 `DATABASE_URL`로 정합니다. 설정이 없으면 SQLite 파일(`todo.db`)로 동작해서, DB 없이도 `uvicorn main:app`으로 로컬 실행할 수 있습니다.
+  - id는 DB 시퀀스가 발급합니다 (예전의 "현재 최대값 + 1" 계산은 앱이 여러 개일 때 같은 번호를 동시에 가져갈 수 있었습니다).
+  - 항목 수정은 행 잠금(`SELECT ... FOR UPDATE`)으로 읽습니다. 같은 항목을 동시에 완료 처리해도 완료 지표를 한 번만 셉니다.
+  - 복제본이 동시에 시작해도 테이블 생성이 겹치지 않도록 PostgreSQL advisory lock을 쓰고, DB가 아직 뜨는 중이면 연결을 다시 시도합니다.
+  - `todo_items_current` 게이지는 메모리 값이 아니라 DB를 세어서 맞춥니다 (앱이 재시작해도, 여러 개여도 같은 값).
+- `docker-compose.yml`에 PostgreSQL(`postgres-sogang017`, 볼륨 `postgres-data`, healthcheck)을 추가하고, 앱은 DB가 준비된 뒤에 시작합니다. 비밀번호는 `.env`의 `POSTGRES_PASSWORD`로 설정합니다 (`.env.example` 참고).
+- 쿠버네티스 매니페스트를 PostgreSQL StatefulSet + Secret + 앱 복제본 2개 구조로 바꿨습니다. 앱이 파일을 쓰지 않아서 루트 파일시스템을 읽기 전용으로 잠갔습니다.
+- 같은 동시 등록 시험을 파일 방식과 DB 방식에서 각각 돌려 비교했습니다. 파일 방식은 복제본 2개에서 500 오류로 실패했고, DB 방식은 3회 모두 통과했습니다 ([k8s/README.md](k8s/README.md) 실험 7).
+- 배포 후 API 테스트에 "복제본 여러 개로 동시 등록해도 유실이 없는지" 시험(`tests_deploy/test_concurrency_live.py`)을 추가했습니다.
+- 단위 테스트는 임시 SQLite 파일로 돌고, `TEST_DATABASE_URL`로 비어 있는 테스트 전용 PostgreSQL을 지정하면 행 잠금 시험까지 실행됩니다.
+- 저장소 정리: 실행 데이터인 `todo.json`과 컴파일 산출물(`__pycache__`)을 git에서 뺐습니다. 도커 이미지에 초기 데이터가 구워져 들어가던 것도 없앴습니다.
+
 ## v8.0.0 — 2026-11-11
 
 - Grafana Loki + Grafana Alloy 로그 수집 스택을 추가했습니다 (Promtail은 EOL이라 공식 후속인 Alloy를 사용했습니다). Alloy가 Docker 소켓으로 `fastapi-app` 컨테이너의 stdout/stderr 로그를 읽어 Loki로 전송합니다.
