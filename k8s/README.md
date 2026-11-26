@@ -38,6 +38,19 @@ kubectl port-forward svc/fastapi-todo 8000:8000   # 브라우저에서 http://lo
 실제로 코드를 고쳤는데도 파드가 옛 코드로 도는 것을 겪었다(`kubectl get pod -o jsonpath='{..imageID}'`로 이미지 해시를 비교해서 확인).
 코드를 바꿀 때마다 태그를 바꾸고(`fastapi-todo:db` 등) yaml의 `image:`도 같이 바꾼다.
 
+HPA와 부하테스트(실험 8)를 하려면 CPU 사용량을 읽는 metrics-server와 JMeter 이미지가 더 필요하다.
+
+```bash
+# metrics-server 설치. kind 모드 클러스터는 kubelet 인증서를 검증하지 못해서 --kubelet-insecure-tls가 필요하다 (실습용)
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.7.2/components.yaml
+kubectl -n kube-system patch deployment metrics-server --type=json \
+  -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+kubectl top pods   # CPU/메모리가 보이면 준비 끝
+
+docker build -t jmeter-todo:local ./jmeter
+kubectl create configmap jmeter-plan --from-file=jmeter/fastapi_test_plan.jmx
+```
+
 ## 실험과 결과
 
 아래는 실제로 실행해서 확인한 결과다. 실험 1~6은 파일 저장 방식, 실험 7은 DB 방식이다.
@@ -145,8 +158,35 @@ cd fastapi-app
 API_BASE_URLS=http://localhost:18001,http://localhost:18002 pytest tests_deploy/test_concurrency_live.py
 ```
 
+### 8. HPA로 부하에 따라 복제본이 자동으로 늘고 준다
+
+저장소가 DB가 되어 복제본을 늘려도 되는 구조가 됐으니, 부하에 따라 복제본 수를 자동으로 조절하는 HPA(`hpa.yaml`)를 붙였다.
+CPU 사용률이 requests(100m)의 60%를 넘으면 늘리고(최소 2, 최대 6), 부하가 사라지면 1분(안정화 창) 뒤에 줄인다.
+같은 JMeter 시험(`jmeter-job.yaml`: 동시 사용자 50명, 20초에 걸쳐 증가, 150초 유지)을 클러스터 안에서 Service 주소로 보내 HPA 없이/있이 비교했다.
+시험 중에는 15초마다 복제본 수와 파드 CPU를 기록했다.
+
+| | 복제본 | 처리량 | 평균 응답 | 95% 응답 | 최대 응답 | 오류 |
+| --- | --- | --- | --- | --- | --- | --- |
+| HPA 없음 (고정) | 2 | 154.3건/초 | 302ms | 504ms | 1098ms | 0건 |
+| HPA (2~6) | 2 → 6 → 2 | 234.3건/초 | 199ms | 458ms | 1202ms | 0건 |
+
+- 고정 2개일 때는 두 파드가 모두 CPU 한도(500m)에 붙어 포화되었다 (파드 CPU 약 500m 유지, 메모리는 80Mi 안팎으로 안정적).
+- HPA는 부하가 시작되고 약 45초 안에 복제본을 2개에서 6개(최대)로 늘렸고, 부하가 끝나자 1분쯤 뒤 2개로 줄였다 (`SuccessfulRescale` 이벤트로 확인).
+- 처리량은 약 52% 늘고 평균 응답은 34% 줄었다. 95% 응답은 504ms에서 458ms로 조금만 줄었다.
+  파드를 늘려도 한 대의 로컬 노드 CPU를 JMeter와 Postgres가 같이 쓰기 때문에, 복제본 수만큼 선형으로 빨라지지는 않는다고 본다 (최대 6개에 도달해 있었으므로 상한을 올려도 이 환경에서는 한계가 있을 것이다).
+- 복제본이 늘어나는 동안에도 오류는 0건이었다. 새 파드는 readinessProbe(`/todos`, DB 조회 포함)를 통과한 뒤에야 Service에서 요청을 받는다.
+- 앱 파드 하나가 쓰는 DB 연결은 연결 풀 기본값(기본 5개, 초과 시 최대 10개 더)이라, 6개로 늘면 최대 90개까지 쓸 수 있다. PostgreSQL 기본 최대 연결(100)에 가까워서 복제본 상한을 더 올리려면 풀 크기나 PgBouncer를 함께 봐야 한다.
+
+```bash
+kubectl apply -f k8s/hpa.yaml
+kubectl apply -f k8s/jmeter-job.yaml
+kubectl get hpa fastapi-todo -w        # 다른 터미널에서 복제본 수 관찰
+kubectl logs -f job/jmeter-load        # 마지막 RESULT 줄에 요청 수/오류/응답시간 집계
+```
+
 ## 아직 해보지 않은 것
 
-- HPA (자동 스케일아웃). 저장소가 DB가 되어 복제본을 늘려도 되는 구조가 됐으니 이제 의미가 있다.
-- JMeter 부하테스트를 클러스터 대상으로 실행.
+- 학교 서버(k3s)에 올리기. 로컬 클러스터에서만 실습했다.
+- InfluxDB/Grafana에 클러스터 부하테스트 결과를 보내서 대시보드로 보기 (지금은 Job 로그의 집계로만 확인).
+- DB 연결 풀 크기와 PgBouncer 조정, Postgres 자체의 병목 확인.
 - 학교 서버(k3s)에는 올리지 않았다. 로컬 클러스터에서만 실습했다.

@@ -1,0 +1,53 @@
+# 클러스터 안에서 JMeter 부하테스트를 한 번 실행하는 Job.
+# 클러스터 안에서 Service 주소(fastapi-todo:8000)로 보내므로, 요청이 복제본들에 나뉘는 실제 경로를 그대로 시험한다.
+#
+# 준비 (README 참고):
+#   docker build -t jmeter-todo:local ./jmeter
+#   kubectl create configmap jmeter-plan --from-file=jmeter/fastapi_test_plan.jmx
+# 실행:
+#   kubectl apply -f k8s/jmeter-job.yaml ; kubectl logs -f job/jmeter-load
+# 다시 실행하려면 Job을 지우고 다시 apply한다: kubectl delete job jmeter-load
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: jmeter-load
+spec:
+  backoffLimit: 0   # 실패해도 다시 시도하지 않는다 (부하테스트가 두 번 돌면 결과가 섞인다)
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: jmeter
+          image: jmeter-todo:local
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: THREADS     # 동시 사용자 수
+              value: "50"
+            - name: RAMP_UP     # 사용자가 다 늘어나기까지 걸리는 초
+              value: "20"
+            - name: DURATION    # 테스트 총 시간(초)
+              value: "150"
+          command: ["sh", "-c"]
+          args:
+            - |
+              # InfluxDB는 클러스터에 없어서 Backend Listener 전송은 실패해도 무시한다 (결과는 아래에서 직접 집계).
+              jmeter -n -t /plan/fastapi_test_plan.jmx -l /tmp/result.jtl \
+                -JTARGET_HOST=fastapi-todo -JTARGET_PORT=8000 \
+                -JTHREADS="$THREADS" -JRAMP_UP="$RAMP_UP" -JDURATION="$DURATION" \
+                -JINFLUXDB_URL="http://localhost:1/write?db=none" 2>&1 | grep -E "summary (=|\+)|Tidying|end of run"
+              # 결과 파일(jtl)에서 요청 수, 오류 수, 평균/95%/최대 응답시간(ms)을 집계한다
+              tail -n +2 /tmp/result.jtl | cut -d, -f2 | sort -n > /tmp/elapsed.txt
+              TOTAL=$(wc -l < /tmp/elapsed.txt)
+              ERRORS=$(tail -n +2 /tmp/result.jtl | awk -F, '$8 != "true"' | wc -l)
+              AVG=$(awk '{s += $1} END {printf "%.0f", s / NR}' /tmp/elapsed.txt)
+              P95=$(awk -v n="$TOTAL" 'NR == int(n * 0.95) {print; exit}' /tmp/elapsed.txt)
+              MAX=$(tail -1 /tmp/elapsed.txt)
+              echo "RESULT requests=$TOTAL errors=$ERRORS avg_ms=$AVG p95_ms=$P95 max_ms=$MAX"
+          volumeMounts:
+            - name: plan
+              mountPath: /plan
+      volumes:
+        - name: plan
+          configMap:
+            name: jmeter-plan

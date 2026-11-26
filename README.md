@@ -88,11 +88,17 @@ FastAPI로 만든 간단한 To-do List 앱입니다. 매주 데브옵스 수업�
 - 배포 후 API 테스트에 복제본 여러 개 동시 등록 시험 추가, 단위 테스트는 임시 SQLite(또는 `TEST_DATABASE_URL`의 PostgreSQL)로 실행
 - `todo.json`, `__pycache__`를 git에서 제거
 
+### v9.1.0 — HPA와 클러스터 부하테스트 (2026-11-26)
+- 쿠버네티스에 **HPA** 추가(CPU 60% 기준, 최소 2 ~ 최대 6). metrics-server는 kind 모드용 설정(`--kubelet-insecure-tls`)으로 설치
+- 클러스터 안에서 도는 **JMeter Job** 추가(Service 주소로 부하, 끝에 요청 수/오류/응답시간 집계)
+- 같은 부하에서 복제본 2개 고정(154건/초, 평균 302ms)과 HPA(2 → 6 → 2, 234건/초, 평균 199ms)를 비교, 오류는 모두 0건 → [k8s/README.md](k8s/README.md) 실험 8
+
 ## 버전 현황
 
 | 버전 | 날짜 | 주요 내용 |
 |---|---|---|
-| v9.0.0 | 2026-11-26 | PostgreSQL 전환(복제본 확장 가능), 동시 쓰기 유실 해결 |
+| v9.1.0 | 2026-11-26 | HPA, 클러스터 대상 JMeter 부하테스트 |
+| [v9.0.0](https://github.com/oh130/FastApi-Todos/releases/tag/v9.0.0) | 2026-11-26 | PostgreSQL 전환(복제본 확장 가능), 동시 쓰기 유실 해결 |
 | [v8.0.0](https://github.com/oh130/FastApi-Todos/releases/tag/v8.0.0) | 2026-11-11 | Grafana Loki/Alloy 로그 수집, 컨테이너 이름 충돌 수정, 검색 필터 |
 | [v7.0.0](https://github.com/oh130/FastApi-Todos/releases/tag/v7.0.0) | 2026-11-07 | JMeter 부하테스트, InfluxDB, 동시성 버그 수정, 인라인 편집 |
 | [v6.0.0](https://github.com/oh130/FastApi-Todos/releases/tag/v6.0.0) | 2026-11-07 | Prometheus/Grafana 모니터링, 비즈니스 지표 |
@@ -115,7 +121,7 @@ App/
 ├── prometheus/prometheus.yml    # Prometheus 스크레이프 설정
 ├── jmeter/                      # JMeter Dockerfile + 부하테스트 시나리오(.jmx)
 ├── alloy/config.alloy           # Grafana Alloy 로그 수집 파이프라인 설정
-├── k8s/                         # 로컬 쿠버네티스 실습 (앱 Deployment, Postgres StatefulSet, Service, Secret) + 실험 기록
+├── k8s/                         # 로컬 쿠버네티스 실습 (앱 Deployment, Postgres StatefulSet, Service, Secret, HPA, JMeter Job) + 실험 기록
 └── fastapi-app/
     ├── main.py                  # FastAPI 앱
     ├── database.py              # DB 연결, 테이블 모델 (환경변수 DATABASE_URL)

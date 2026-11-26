@@ -1,0 +1,29 @@
+# HPA(HorizontalPodAutoscaler): 부하에 따라 앱 복제본 수를 자동으로 늘리고 줄인다.
+# 앱이 데이터를 DB에 두는 stateless 구조라서 복제본을 늘려도 안전하다 (k8s/README.md 실험 7).
+# CPU 사용량을 읽으려면 metrics-server가 필요하다 (README의 준비 단계).
+#
+# 주의: Deployment(fastapi-todo.yaml)에 replicas: 2가 적혀 있어서, 그 파일을 다시 apply하면 HPA가 늘려 둔 복제본 수가 2로 되돌아간다.
+# (운영에서는 HPA를 쓰면 Deployment의 replicas를 지우는 것이 정석이다. 실습에서는 시작 복제본을 눈에 보이게 하려고 남겨 뒀다.)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: fastapi-todo
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: fastapi-todo
+  minReplicas: 2   # 부하가 없어도 최소 2개 (하나가 죽어도 서비스 유지)
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          # requests.cpu(100m) 대비 사용률. 파드 평균이 60m을 넘으면 늘린다.
+          averageUtilization: 60
+  behavior:
+    scaleDown:
+      # 기본값은 5분. 부하가 사라진 뒤 줄어드는 모습을 실습에서 확인할 수 있게 1분으로 줄였다.
+      stabilizationWindowSeconds: 60
