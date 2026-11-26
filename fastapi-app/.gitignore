@@ -10,5 +10,7 @@ pytest_report/
 api_test_report/
 ui_test_report/
 .coverage
+todo.db
+todo.json
 coverage.xml
 .scannerwork/

@@ -3,6 +3,9 @@
 docker-compose로 돌리던 FastAPI 앱을 로컬 쿠버네티스(Docker Desktop 내장, kind 모드)에 올려 보는 실습이다.
 운영 배포용이 아니라, compose에서 하던 설정이 쿠버네티스에서 어떻게 표현되는지 확인하는 것이 목적이다.
 
+> v9.0.0부터 데이터를 파일(`todo.json`)이 아니라 PostgreSQL에 저장한다. **실험 1~6은 파일 저장 방식(v8.0.0)에서 한 기록**이고,
+> 그 실험에서 드러난 한계를 DB로 해결한 결과는 [실험 7](#7-db로-바꾸면-복제본을-늘려도-유실이-없다)에 있다.
+
 ## compose 설정과의 대응
 
 | compose (`docker-compose.yml`, `Dockerfile`) | 쿠버네티스 (`fastapi-todo.yaml`) |
@@ -10,7 +13,9 @@ docker-compose로 돌리던 FastAPI 앱을 로컬 쿠버네티스(Docker Desktop
 | `restart: unless-stopped` | Deployment가 파드 수를 유지 (죽으면 새로 띄움) |
 | `ports: "5017:8000"` | Service (+ `kubectl port-forward`) |
 | `mem_limit: 128m`, `cpus: 0.5` | `resources.limits` (memory 128Mi, cpu 500m) |
-| named volume (예: `grafana-data`) | PVC (`todo-data`) |
+| named volume (예: `postgres-data`) | StatefulSet의 `volumeClaimTemplates` (PVC `data-postgres-0`) |
+| `POSTGRES_PASSWORD`(`.env`) | Secret `todo-db` (yaml에 적지 않고 명령으로 생성) |
+| `depends_on: condition: service_healthy` | readinessProbe + 앱 시작 시 DB 연결 재시도 |
 | (없음) | `readinessProbe`, `livenessProbe` |
 | `no-new-privileges`, `cap_drop: ALL`, non-root 유저 | `securityContext` |
 
@@ -19,7 +24,8 @@ docker-compose로 돌리던 FastAPI 앱을 로컬 쿠버네티스(Docker Desktop
 Docker Desktop의 Settings > Kubernetes에서 Enable. 클러스터가 뜨면:
 
 ```bash
-docker build -t fastapi-todo:pvc ./fastapi-app
+docker build -t fastapi-todo:db ./fastapi-app
+kubectl create secret generic todo-db --from-literal=POSTGRES_PASSWORD='원하는비밀번호'   # DB 비밀번호는 yaml에 적지 않는다
 kubectl apply -f k8s/fastapi-todo.yaml
 kubectl get pods,pvc
 kubectl port-forward svc/fastapi-todo 8000:8000   # 브라우저에서 http://localhost:8000
@@ -30,11 +36,11 @@ kubectl port-forward svc/fastapi-todo 8000:8000   # 브라우저에서 http://lo
 
 주의: 같은 태그(`:local`)로 이미지를 다시 빌드해서 `apply`하면 노드에 캐시된 옛 이미지가 계속 쓰인다.
 실제로 코드를 고쳤는데도 파드가 옛 코드로 도는 것을 겪었다(`kubectl get pod -o jsonpath='{..imageID}'`로 이미지 해시를 비교해서 확인).
-코드를 바꿀 때마다 태그를 바꾸고(`fastapi-todo:pvc` 등) yaml의 `image:`도 같이 바꾼다.
+코드를 바꿀 때마다 태그를 바꾸고(`fastapi-todo:db` 등) yaml의 `image:`도 같이 바꾼다.
 
 ## 실험과 결과
 
-아래는 실제로 실행해서 확인한 결과다.
+아래는 실제로 실행해서 확인한 결과다. 실험 1~6은 파일 저장 방식, 실험 7은 DB 방식이다.
 
 ### 1. 파드를 지우면 자동으로 복구된다
 
@@ -113,8 +119,34 @@ GET 결과는 매번 29건으로 같았다(실험 2처럼 갈라지지는 않는
 kubectl scale deployment fastapi-todo --replicas=1   # 원복
 ```
 
+### 7. DB로 바꾸면 복제본을 늘려도 유실이 없다
+
+실험 6의 한계(복제본이 같은 파일을 덮어써서 동시 쓰기가 유실됨)를 없애려고 저장소를 PostgreSQL로 바꿨다.
+Postgres는 StatefulSet(`postgres-0`, PVC 1Gi)으로 두고, 앱은 복제본 2개로 올렸다. 비밀번호는 Secret(`todo-db`)으로 넘긴다.
+같은 시험(`fastapi-app/tests_deploy/test_concurrency_live.py`: 동시 등록 40건을 두 복제본에 번갈아 보내고, 등록한 id가 전부 조회되는지 확인)을 전/후로 돌렸다.
+복제본마다 `kubectl port-forward`로 따로 접속해서 요청을 두 곳에 나눠 보냈다.
+
+| | 저장소 | 복제본 | 결과 |
+| --- | --- | --- | --- |
+| 전 (v8.0.0) | `todo.json`, PVC 공유 | 2 | 동시 등록 중 **500 오류**로 시험 실패 (2회 모두) |
+| 후 (v9.0.0) | PostgreSQL | 2 | **3회 모두 통과** (40건 전부 저장, id 중복 없음, 어느 복제본으로 읽어도 보임) |
+
+- 한 복제본에서 등록한 항목이 다른 복제본에서 바로 조회된다 (둘 다 같은 DB를 본다).
+- `postgres-0` 파드를 지우면 StatefulSet이 같은 이름으로 다시 띄우고 같은 PVC를 붙여서, 등록해 둔 데이터가 그대로 남았다.
+- 앱은 파일을 쓰지 않아서 `readOnlyRootFilesystem: true`로 루트 파일시스템을 잠가도 정상 동작했다.
+- 앱의 동시성 처리는 `threading.Lock`(한 프로세스 안에서만 유효)에서 DB로 옮겨 갔다. id는 DB 시퀀스가 발급하고,
+  항목 수정은 행 잠금(`SELECT ... FOR UPDATE`)으로 읽어서 같은 항목을 동시에 완료로 바꿔도 완료 지표를 한 번만 센다.
+
+```bash
+# 복제본 두 곳에 번갈아 보내기
+kubectl port-forward pod/<앱 파드 1> 18001:8000 &
+kubectl port-forward pod/<앱 파드 2> 18002:8000 &
+cd fastapi-app
+API_BASE_URLS=http://localhost:18001,http://localhost:18002 pytest tests_deploy/test_concurrency_live.py
+```
+
 ## 아직 해보지 않은 것
 
-- HPA (자동 스케일아웃). 실험 6의 이유로 저장소를 DB로 바꾸기 전에는 의미가 없다.
+- HPA (자동 스케일아웃). 저장소가 DB가 되어 복제본을 늘려도 되는 구조가 됐으니 이제 의미가 있다.
 - JMeter 부하테스트를 클러스터 대상으로 실행.
 - 학교 서버(k3s)에는 올리지 않았다. 로컬 클러스터에서만 실습했다.

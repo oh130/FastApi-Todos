@@ -8,3 +8,5 @@ httpx2>=2.13.1
 prometheus-fastapi-instrumentator>=8.1.0
 prometheus-client>=0.26.0
 psutil>=6.1.0
+sqlalchemy>=2.0.40
+psycopg[binary]>=3.2.10

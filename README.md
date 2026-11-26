@@ -80,10 +80,19 @@ FastAPI로 만든 간단한 To-do List 앱입니다. 매주 데브옵스 수업�
 - 앱 변경: 저장 파일 경로를 환경변수 `TODO_FILE`로 지정할 수 있게 함 (기본값은 기존 `todo.json`이라 compose 배포는 그대로)
 - 로컬 클러스터에서만 실습했고, 서버에는 배포하지 않음. HPA와 클러스터 대상 부하테스트는 해보지 않음
 
+### v9.0.0 — 데이터 저장소를 DB로 (2026-11-26)
+- 데이터를 파일(`todo.json`)에서 **PostgreSQL**로 옮김. 쿠버네티스 실험에서 복제본을 늘리면 파일 저장 방식은 데이터가 갈라지고(실험 2) 동시 쓰기가 유실(실험 6)되는 한계를 확인했고, 그 한계를 DB로 해결
+- SQLAlchemy 2 + psycopg 3. 접속 주소는 환경변수 `DATABASE_URL`(없으면 SQLite 파일). id는 DB 시퀀스가 발급하고, 수정은 행 잠금(`SELECT ... FOR UPDATE`)으로 읽음
+- `docker-compose.yml`에 PostgreSQL 추가(볼륨, healthcheck, 앱은 DB 준비 후 시작), 쿠버네티스는 Postgres StatefulSet + Secret + 앱 복제본 2개
+- 전/후 비교: 같은 동시 등록 시험이 파일 방식(복제본 2개)에서는 500 오류로 실패, DB 방식에서는 3회 모두 통과 → [k8s/README.md](k8s/README.md) 실험 7
+- 배포 후 API 테스트에 복제본 여러 개 동시 등록 시험 추가, 단위 테스트는 임시 SQLite(또는 `TEST_DATABASE_URL`의 PostgreSQL)로 실행
+- `todo.json`, `__pycache__`를 git에서 제거
+
 ## 버전 현황
 
 | 버전 | 날짜 | 주요 내용 |
 |---|---|---|
+| v9.0.0 | 2026-11-26 | PostgreSQL 전환(복제본 확장 가능), 동시 쓰기 유실 해결 |
 | [v8.0.0](https://github.com/oh130/FastApi-Todos/releases/tag/v8.0.0) | 2026-11-11 | Grafana Loki/Alloy 로그 수집, 컨테이너 이름 충돌 수정, 검색 필터 |
 | [v7.0.0](https://github.com/oh130/FastApi-Todos/releases/tag/v7.0.0) | 2026-11-07 | JMeter 부하테스트, InfluxDB, 동시성 버그 수정, 인라인 편집 |
 | [v6.0.0](https://github.com/oh130/FastApi-Todos/releases/tag/v6.0.0) | 2026-11-07 | Prometheus/Grafana 모니터링, 비즈니스 지표 |
@@ -100,16 +109,16 @@ App/
 ├── CHANGELOG.md
 ├── README.md
 ├── SECURITY_OWASP_REVIEW.md     # Claude Code OWASP Top 10 / SonarQube 분석 결과
-├── docker-compose.yml           # fastapi-app, jmeter, influxdb, sonarqube, prometheus, grafana, node-exporter, loki, alloy
-├── .env.example                 # Grafana 관리자 비밀번호 등 (.env로 복사해서 사용, git에 안 올라감)
+├── docker-compose.yml           # fastapi-app, postgres, jmeter, influxdb, sonarqube, prometheus, grafana, node-exporter, loki, alloy
+├── .env.example                 # Grafana·PostgreSQL 비밀번호 (.env로 복사해서 사용, git에 안 올라감)
 ├── ci/                          # Jenkins Pipeline 스크립트 (참고용, 실제 설정은 Jenkins Job에 붙여넣음)
 ├── prometheus/prometheus.yml    # Prometheus 스크레이프 설정
 ├── jmeter/                      # JMeter Dockerfile + 부하테스트 시나리오(.jmx)
 ├── alloy/config.alloy           # Grafana Alloy 로그 수집 파이프라인 설정
-├── k8s/                         # 로컬 쿠버네티스 실습 (Deployment, Service, PVC) + 실험 기록
+├── k8s/                         # 로컬 쿠버네티스 실습 (앱 Deployment, Postgres StatefulSet, Service, Secret) + 실험 기록
 └── fastapi-app/
     ├── main.py                  # FastAPI 앱
-    ├── todo.json                # 데이터 저장 파일 (환경변수 TODO_FILE로 경로 변경 가능)
+    ├── database.py              # DB 연결, 테이블 모델 (환경변수 DATABASE_URL)
     ├── requirements.txt         # 운영 의존성
     ├── requirements-dev.txt     # UI 테스트 전용 의존성 (playwright)
     ├── pyproject.toml           # pytest 설정
@@ -131,14 +140,17 @@ pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
-`http://127.0.0.1:8000` 접속.
+`http://127.0.0.1:8000` 접속. `DATABASE_URL`을 지정하지 않으면 앱 폴더의 SQLite 파일(`todo.db`)에 저장합니다.
+PostgreSQL을 쓰려면 `DATABASE_URL=postgresql+psycopg://todo:<비밀번호>@<호스트>:5432/todos`를 지정합니다.
+docker compose로 실행하면 `.env`의 `POSTGRES_PASSWORD`로 PostgreSQL 컨테이너가 함께 뜨고 앱이 자동으로 연결됩니다.
 
 ## 쿠버네티스 로컬 실행
 
 Docker Desktop의 Settings > Kubernetes에서 Enable 한 뒤:
 
 ```bash
-docker build -t fastapi-todo:pvc ./fastapi-app
+docker build -t fastapi-todo:db ./fastapi-app
+kubectl create secret generic todo-db --from-literal=POSTGRES_PASSWORD='원하는비밀번호'
 kubectl apply -f k8s/fastapi-todo.yaml
 kubectl port-forward svc/fastapi-todo 8000:8000   # http://localhost:8000
 ```
@@ -151,4 +163,11 @@ kubectl port-forward svc/fastapi-todo 8000:8000   # http://localhost:8000
 cd fastapi-app
 pip install -r requirements.txt pytest-playwright
 pytest tests --html=pytest_report/report.html --self-contained-html --cov=. --cov-report=html:htmlcov
+```
+
+단위 테스트는 임시 SQLite 파일로 실행됩니다. PostgreSQL에서 실행하려면(행 잠금 시험 포함) **비어 있는 테스트 전용 DB**를 지정하세요.
+테스트가 시작할 때마다 테이블을 지우고 다시 만들기 때문에 실제 데이터가 있는 DB를 가리키면 안 됩니다.
+
+```bash
+TEST_DATABASE_URL=postgresql+psycopg://todo:<비밀번호>@localhost:5432/todos_test pytest tests
 ```
