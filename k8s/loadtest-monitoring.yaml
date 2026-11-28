@@ -1,0 +1,171 @@
+# JMeter 부하테스트 결과를 시각화하는 InfluxDB + Grafana (클러스터 안).
+# docker-compose.yml의 influxdb/grafana와 같은 역할이다. JMeter Job(jmeter-job.yaml)이 결과를 InfluxDB로 보내고,
+# Grafana가 읽어서 대시보드로 보여 준다.
+#
+# Grafana 관리자 비밀번호는 이 파일에 적지 않는다(공개 저장소). 적용 전에 Secret을 먼저 만든다:
+#   kubectl create secret generic todo-grafana --from-literal=GF_SECURITY_ADMIN_PASSWORD='원하는비밀번호'
+# 대시보드 JSON도 ConfigMap으로 먼저 만든다 (Grafana가 시작할 때 자동으로 불러온다):
+#   kubectl create configmap grafana-dashboards --from-file=k8s/jmeter-dashboard.json
+# 접속: kubectl port-forward svc/grafana 3000:3000  ->  http://localhost:3000 (admin / 위 비밀번호)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: influxdb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: influxdb
+  template:
+    metadata:
+      labels:
+        app: influxdb
+    spec:
+      containers:
+        - name: influxdb
+          image: influxdb:1.8
+          ports:
+            - containerPort: 8086
+          env:
+            - name: INFLUXDB_DB   # 시작할 때 이 이름의 DB를 만든다 (JMeter가 db=jmeter로 보낸다)
+              value: jmeter
+          # 부하테스트 결과는 일회성이라 디스크(PVC) 없이 emptyDir에 둔다. 파드가 다시 뜨면 결과는 사라진다.
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/influxdb
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 8086
+            initialDelaySeconds: 3
+            periodSeconds: 5
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+# JMeter Job이 influxdb:8086으로 결과를 보낸다 (인증 없는 쓰기 API라 클러스터 밖으로는 열지 않는다)
+apiVersion: v1
+kind: Service
+metadata:
+  name: influxdb
+spec:
+  type: ClusterIP
+  selector:
+    app: influxdb
+  ports:
+    - port: 8086
+      targetPort: 8086
+---
+# Grafana가 시작할 때 읽는 데이터 소스 설정(provisioning). 화면에서 직접 등록하지 않아도 InfluxDB가 연결된 채로 뜬다.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+data:
+  datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: InfluxDB-JMeter
+        uid: jmeter-influx
+        type: influxdb
+        access: proxy
+        url: http://influxdb:8086
+        isDefault: true
+        jsonData:
+          dbName: jmeter
+          httpMode: GET
+---
+# 대시보드를 폴더에서 자동으로 불러오라는 설정(provisioning). 대시보드 JSON 자체는 ConfigMap grafana-dashboards에 있다.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: jmeter
+        folder: ""
+        type: file
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:13.3.0
+          ports:
+            - containerPort: 3000
+          env:
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: todo-grafana
+                  key: GF_SECURITY_ADMIN_PASSWORD
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "false"
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      volumes:
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: dashboard-provider
+          configMap:
+            name: grafana-dashboard-provider
+        - name: dashboards
+          configMap:
+            name: grafana-dashboards
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+spec:
+  type: ClusterIP
+  selector:
+    app: grafana
+  ports:
+    - port: 3000
+      targetPort: 3000

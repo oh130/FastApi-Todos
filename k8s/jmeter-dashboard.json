@@ -1,0 +1,290 @@
+{
+  "uid": "jmeter-k8s",
+  "title": "JMeter 부하테스트 (쿠버네티스)",
+  "tags": [
+    "jmeter",
+    "k8s"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "처리량 (요청/초)",
+      "description": "JMeter가 5초마다 보내는 요청 수를 초당 값으로 환산했다.",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "jmeter-influx"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "jmeter-influx"
+          },
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "query": "SELECT sum(\"count\") / 5 FROM \"jmeter\" WHERE \"transaction\" = 'all' AND \"statut\" = 'all' AND $timeFilter GROUP BY time(5s) fill(null)",
+          "alias": "처리량"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "응답시간 (ms)",
+      "description": "",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "jmeter-influx"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "jmeter-influx"
+          },
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "query": "SELECT mean(\"avg\") FROM \"jmeter\" WHERE \"transaction\" = 'all' AND \"statut\" = 'all' AND $timeFilter GROUP BY time(5s) fill(null)",
+          "alias": "평균"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "jmeter-influx"
+          },
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "query": "SELECT mean(\"pct95.0\") FROM \"jmeter\" WHERE \"transaction\" = 'all' AND \"statut\" = 'all' AND $timeFilter GROUP BY time(5s) fill(null)",
+          "alias": "95%"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "jmeter-influx"
+          },
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "query": "SELECT max(\"max\") FROM \"jmeter\" WHERE \"transaction\" = 'all' AND \"statut\" = 'all' AND $timeFilter GROUP BY time(5s) fill(null)",
+          "alias": "최대"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "오류 (건/5초)",
+      "description": "0이어야 정상이다.",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "jmeter-influx"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "jmeter-influx"
+          },
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "query": "SELECT sum(\"countError\") FROM \"jmeter\" WHERE \"transaction\" = 'all' AND \"statut\" = 'all' AND $timeFilter GROUP BY time(5s) fill(0)",
+          "alias": "오류"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "동시 사용자 (활성 스레드)",
+      "description": "",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "jmeter-influx"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "jmeter-influx"
+          },
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "query": "SELECT max(\"maxAT\") FROM \"jmeter\" WHERE \"transaction\" = 'internal' AND $timeFilter GROUP BY time(5s) fill(null)",
+          "alias": "동시 사용자"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "엔드포인트별 평균 응답시간 (ms)",
+      "description": "",
+      "datasource": {
+        "type": "influxdb",
+        "uid": "jmeter-influx"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": true,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "influxdb",
+            "uid": "jmeter-influx"
+          },
+          "rawQuery": true,
+          "resultFormat": "time_series",
+          "query": "SELECT mean(\"avg\") FROM \"jmeter\" WHERE \"statut\" = 'ok' AND \"transaction\" =~ /^(GET|POST|PUT|DELETE)/ AND $timeFilter GROUP BY time(5s), \"transaction\" fill(null)",
+          "alias": "$tag_transaction"
+        }
+      ]
+    }
+  ]
+}

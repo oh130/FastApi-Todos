@@ -1,5 +1,14 @@
 # Release notes
 
+## v9.2.0 — 2026-11-28
+
+- **Jenkins 배포가 DB를 알도록 고쳤습니다.** v9.0.0부터 앱은 PostgreSQL이 있어야 데이터가 유지되는데, 기존 파이프라인은 앱 컨테이너만 띄웠습니다(DB 없이는 컨테이너 안 SQLite로 동작해서 재배포 때마다 데이터가 사라집니다).
+  - 서버에서 실행하는 `ci/remote-deploy.sh`를 추가했습니다. 같은 도커 네트워크에 PostgreSQL 컨테이너(없을 때만 생성, 있으면 데이터 유지)와 앱 컨테이너(매번 교체)를 띄웁니다. 앱은 `cap-drop ALL`, `no-new-privileges`로 실행합니다.
+  - `docker run` 방식 파이프라인 4개(dockerhub-team, pytest-coverage, sonarqube, jmeter)의 Deploy 단계가 이 스크립트를 쓰도록 바꿨습니다. DB 비밀번호는 Jenkins Credentials(Secret text `todo-db-password`)에서 꺼내 ssh 표준입력으로만 전달해서 명령줄과 로그에 남지 않습니다.
+  - compose 방식 파이프라인(own, team)은 서버의 `.env`에 `POSTGRES_PASSWORD`가 없으면 원인을 알기 어려운 오류로 멈추므로, 배포 전에 확인하고 분명한 메시지로 실패하게 했습니다.
+  - 로컬 도커에서 스크립트를 두 번 실행해 검증했습니다: 두 번째 배포에서 앱만 교체되고 DB 컨테이너와 데이터는 그대로였고, 배포 후 API 테스트가 통과했습니다. 비밀번호가 없으면 실행을 거부합니다.
+- **부하테스트 결과를 Grafana 대시보드로 볼 수 있게 했습니다.** 클러스터 안에 InfluxDB와 Grafana(`k8s/loadtest-monitoring.yaml`)를 추가했고, JMeter Job이 결과를 InfluxDB로 실시간 전송합니다. Grafana는 데이터 소스와 대시보드(`k8s/jmeter-dashboard.json`: 처리량, 응답시간, 오류, 동시 사용자, 엔드포인트별 응답시간)를 시작할 때 자동으로 불러옵니다 ([k8s/README.md](k8s/README.md) 실험 9).
+
 ## v9.1.0 — 2026-11-26
 
 - 쿠버네티스에 HPA(`k8s/hpa.yaml`)를 추가했습니다. CPU 사용률이 requests의 60%를 넘으면 앱 복제본을 최대 6개까지 늘리고, 부하가 사라지면 1분 뒤 줄입니다. 데이터를 DB에 두는 stateless 구조(v9.0.0)라서 복제본을 안전하게 늘릴 수 있습니다.

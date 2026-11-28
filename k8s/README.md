@@ -51,6 +51,15 @@ docker build -t jmeter-todo:local ./jmeter
 kubectl create configmap jmeter-plan --from-file=jmeter/fastapi_test_plan.jmx
 ```
 
+부하테스트 결과를 Grafana 대시보드로 보려면(실험 9) InfluxDB와 Grafana도 올린다.
+
+```bash
+kubectl create secret generic todo-grafana --from-literal=GF_SECURITY_ADMIN_PASSWORD='원하는비밀번호'
+kubectl create configmap grafana-dashboards --from-file=k8s/jmeter-dashboard.json
+kubectl apply -f k8s/loadtest-monitoring.yaml
+kubectl port-forward svc/grafana 3000:3000   # http://localhost:3000  (admin / 위 비밀번호)
+```
+
 ## 실험과 결과
 
 아래는 실제로 실행해서 확인한 결과다. 실험 1~6은 파일 저장 방식, 실험 7은 DB 방식이다.
@@ -184,9 +193,19 @@ kubectl get hpa fastapi-todo -w        # 다른 터미널에서 복제본 수 �
 kubectl logs -f job/jmeter-load        # 마지막 RESULT 줄에 요청 수/오류/응답시간 집계
 ```
 
+### 9. 부하테스트 결과를 Grafana 대시보드로 본다
+
+실험 8에서는 결과를 Job 로그의 집계로만 확인했다. 클러스터 안에 InfluxDB와 Grafana를 올려서(`loadtest-monitoring.yaml`),
+JMeter Job의 Backend Listener가 결과를 InfluxDB로 실시간 전송하고 Grafana가 그 값을 그리게 했다. compose에서 하던 구성(JMeter, InfluxDB, Grafana)을 클러스터로 옮긴 것이다.
+
+- Grafana는 시작할 때 데이터 소스(InfluxDB)와 대시보드(`jmeter-dashboard.json`)를 자동으로 불러온다 (provisioning). 화면에서 직접 등록하거나 가져오지 않아도 된다.
+- 대시보드 패널: 처리량(요청/초), 응답시간(평균/95%/최대), 오류 건수, 동시 사용자 수, 엔드포인트별 평균 응답시간.
+- 확인한 것: 60초짜리 시험을 돌린 뒤 Grafana API로 데이터 소스 상태(OK), 대시보드 자동 로드, 5개 패널 쿼리 전부가 실제 값을 돌려주는지 확인했다.
+  (화면 모습은 직접 `kubectl port-forward svc/grafana 3000:3000`으로 확인한다. 이 문서는 API로 확인한 결과만 적었다.)
+- InfluxDB는 결과가 일회성이라 PVC 없이 `emptyDir`에 둔다. 파드가 다시 뜨면 이전 결과는 사라진다.
+
 ## 아직 해보지 않은 것
 
 - 학교 서버(k3s)에 올리기. 로컬 클러스터에서만 실습했다.
-- InfluxDB/Grafana에 클러스터 부하테스트 결과를 보내서 대시보드로 보기 (지금은 Job 로그의 집계로만 확인).
 - DB 연결 풀 크기와 PgBouncer 조정, Postgres 자체의 병목 확인.
 - 학교 서버(k3s)에는 올리지 않았다. 로컬 클러스터에서만 실습했다.

@@ -10,6 +10,9 @@
 //   이미 제거하라고 명시한 옵션인데 예시 코드엔 남아있었음). JMeter는 REMOTE_HOST의 공인 IP:포트로
 //   나가는 외부 HTTP 요청만 하면 되므로 기본 브리지 네트워크로 충분함
 
+// [v9.0.0] 앱이 DB(PostgreSQL)에 데이터를 저장하므로 Deploy 단계는 ci/remote-deploy.sh를 서버에서 실행한다 (DB 컨테이너 + 앱 컨테이너).
+// 사전 조건: Jenkins Credentials에 Secret text `todo-db-password`(영문/숫자 12자 이상)를 등록해야 한다.
+
 pipeline {
     agent any
 
@@ -113,25 +116,16 @@ pipeline {
 
         stage('Deploy') {
             steps {
-                script {
+                // DB 비밀번호는 Credentials에서 꺼내 ssh 표준입력으로만 서버에 보낸다 (명령줄/로그에 남지 않게)
+                withCredentials([string(credentialsId: 'todo-db-password', variable: 'POSTGRES_PASSWORD')]) {
                     sshagent(credentials: ['deploy-key']) {
-                        sh """
-                            set -e
-
-                            mkdir -p ~/.ssh && chmod 700 ~/.ssh
-                            ssh-keyscan -H ${REMOTE_HOST} >> ~/.ssh/known_hosts 2>/dev/null
-                            sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts
-
-                            ssh -o StrictHostKeyChecking=yes ${REMOTE_USER}@${REMOTE_HOST} \\
-                                'docker pull ${IMAGE_NAME}:${BUILD_NUMBER} && \\
-                                 docker stop ${CONTAINER_NAME} || true && \\
-                                 docker rm ${CONTAINER_NAME} || true && \\
-                                 docker run -d \\
-                                     --name ${CONTAINER_NAME} \\
-                                     --restart unless-stopped \\
-                                     -p ${APP_HOST_PORT}:${APP_CONTAINER_PORT} \\
-                                     ${IMAGE_NAME}:${BUILD_NUMBER}'
-                        """
+                        sh '''
+{
+  printf "export IMAGE='%s' APP_NAME='%s' HOST_PORT='%s' CONTAINER_PORT='%s'\\n" "${IMAGE_NAME}:${BUILD_NUMBER}" "$CONTAINER_NAME" "$APP_HOST_PORT" "$APP_CONTAINER_PORT"
+  printf "export POSTGRES_PASSWORD='%s'\\n" "$POSTGRES_PASSWORD"
+  cat ci/remote-deploy.sh
+} | ssh -o StrictHostKeyChecking=accept-new "$REMOTE_USER@$REMOTE_HOST" bash -se
+'''
                     }
                 }
             }

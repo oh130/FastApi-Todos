@@ -9,6 +9,9 @@
 // 가이드 예시의 BRANCH_NAME='main', credentials(['admin'])은 이 레포 실제 값과 달라서
 // master / deploy-key로 고쳤습니다.
 
+// [v9.0.0] 앱이 DB(PostgreSQL)에 데이터를 저장하므로 Deploy 단계는 ci/remote-deploy.sh를 서버에서 실행한다 (DB 컨테이너 + 앱 컨테이너).
+// 사전 조건: Jenkins Credentials에 Secret text `todo-db-password`(영문/숫자 12자 이상)를 등록해야 한다.
+
 pipeline {
     agent any
 
@@ -103,18 +106,16 @@ pipeline {
 
         stage('Deploy') {
             steps {
-                script {
+                // DB 비밀번호는 Credentials에서 꺼내 ssh 표준입력으로만 서버에 보낸다 (명령줄/로그에 남지 않게)
+                withCredentials([string(credentialsId: 'todo-db-password', variable: 'POSTGRES_PASSWORD')]) {
                     sshagent(credentials: ['deploy-key']) {
-                        sh """
-ssh -o StrictHostKeyChecking=accept-new ${REMOTE_USER}@${REMOTE_HOST} \\
-"export IMAGE_NAME='${IMAGE_NAME}' IMAGE_TAG='${IMAGE_TAG}' CONTAINER_NAME='${CONTAINER_NAME}' HOST_PORT='${HOST_PORT}' CONTAINER_PORT='${CONTAINER_PORT}'; /bin/bash -se" <<'ENDSSH'
-set -e
-
-docker pull "\$IMAGE_NAME:\$IMAGE_TAG"
-docker rm -f "\$CONTAINER_NAME" || true
-docker run -d --name "\$CONTAINER_NAME" -p "\$HOST_PORT:\$CONTAINER_PORT" "\$IMAGE_NAME:\$IMAGE_TAG"
-ENDSSH
-"""
+                        sh '''
+{
+  printf "export IMAGE='%s' APP_NAME='%s' HOST_PORT='%s' CONTAINER_PORT='%s'\\n" "${IMAGE_NAME}:${IMAGE_TAG}" "$CONTAINER_NAME" "$HOST_PORT" "$CONTAINER_PORT"
+  printf "export POSTGRES_PASSWORD='%s'\\n" "$POSTGRES_PASSWORD"
+  cat ci/remote-deploy.sh
+} | ssh -o StrictHostKeyChecking=accept-new "$REMOTE_USER@$REMOTE_HOST" bash -se
+'''
                     }
                 }
             }

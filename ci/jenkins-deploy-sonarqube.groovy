@@ -9,6 +9,9 @@
 // - CONTAINER_NAME/HOST_PORT: 3주차 docker-compose가 이미 'FastApi-app' 이름으로 5001 포트를 쓰고 있어서
 //   이름이 겹치면 그 컨테이너가 매 빌드마다 삭제됨 -> 별도 이름/포트(fastapi-app-ci, 5003) 사용
 
+// [v9.0.0] 앱이 DB(PostgreSQL)에 데이터를 저장하므로 Deploy 단계는 ci/remote-deploy.sh를 서버에서 실행한다 (DB 컨테이너 + 앱 컨테이너).
+// 사전 조건: Jenkins Credentials에 Secret text `todo-db-password`(영문/숫자 12자 이상)를 등록해야 한다.
+
 pipeline {
     agent any
 
@@ -125,18 +128,16 @@ pipeline {
 
         stage('Deploy') {
             steps {
-                script {
+                // DB 비밀번호는 Credentials에서 꺼내 ssh 표준입력으로만 서버에 보낸다 (명령줄/로그에 남지 않게)
+                withCredentials([string(credentialsId: 'todo-db-password', variable: 'POSTGRES_PASSWORD')]) {
                     sshagent(credentials: ['deploy-key']) {
-                        sh """
-ssh -o StrictHostKeyChecking=accept-new ${REMOTE_USER}@${REMOTE_HOST} \\
-"export IMAGE_NAME='${IMAGE_NAME}' CONTAINER_NAME='${CONTAINER_NAME}' HOST_PORT='${HOST_PORT}' CONTAINER_PORT='${CONTAINER_PORT}'; /bin/bash -se" <<'ENDSSH'
-set -e
-
-docker pull "\$IMAGE_NAME:latest"
-docker rm -f "\$CONTAINER_NAME" || true
-docker run -d --name "\$CONTAINER_NAME" -p "\$HOST_PORT:\$CONTAINER_PORT" "\$IMAGE_NAME:latest"
-ENDSSH
-"""
+                        sh '''
+{
+  printf "export IMAGE='%s' APP_NAME='%s' HOST_PORT='%s' CONTAINER_PORT='%s'\\n" "${IMAGE_NAME}:latest" "$CONTAINER_NAME" "$HOST_PORT" "$CONTAINER_PORT"
+  printf "export POSTGRES_PASSWORD='%s'\\n" "$POSTGRES_PASSWORD"
+  cat ci/remote-deploy.sh
+} | ssh -o StrictHostKeyChecking=accept-new "$REMOTE_USER@$REMOTE_HOST" bash -se
+'''
                     }
                 }
             }

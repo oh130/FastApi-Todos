@@ -47,6 +47,12 @@ else
 fi
 
 cd "$REPO_DIR"
+# [v9.0.0] compose가 PostgreSQL을 함께 띄우므로, 서버의 레포 폴더에 있는 .env(git에 안 올라감)에 POSTGRES_PASSWORD가 있어야 한다.
+# 처음 한 번 서버에서 직접 추가한다: echo "POSTGRES_PASSWORD=<영문/숫자 12자 이상>" >> .env
+if ! grep -q '^POSTGRES_PASSWORD=' .env 2>/dev/null; then
+  echo "ERROR: $PWD/.env 에 POSTGRES_PASSWORD 가 없다. 서버에서 .env에 추가한 뒤 다시 실행해라." >&2
+  exit 1
+fi
 docker compose up -d --build --remove-orphans
 docker compose ps
 ENDSSH
