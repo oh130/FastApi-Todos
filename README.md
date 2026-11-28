@@ -93,10 +93,16 @@ FastAPI로 만든 간단한 To-do List 앱입니다. 매주 데브옵스 수업�
 - 클러스터 안에서 도는 **JMeter Job** 추가(Service 주소로 부하, 끝에 요청 수/오류/응답시간 집계)
 - 같은 부하에서 복제본 2개 고정(154건/초, 평균 302ms)과 HPA(2 → 6 → 2, 234건/초, 평균 199ms)를 비교, 오류는 모두 0건 → [k8s/README.md](k8s/README.md) 실험 8
 
+### v9.2.0 — Jenkins 배포의 DB 대응, 부하테스트 대시보드 (2026-11-28)
+- Jenkins `docker run` 배포 파이프라인 4개가 `ci/remote-deploy.sh`로 PostgreSQL 컨테이너와 앱 컨테이너를 함께 배포 (DB 비밀번호는 Jenkins Credentials `todo-db-password`)
+- compose 배포 파이프라인은 서버 `.env`의 `POSTGRES_PASSWORD`를 먼저 확인
+- 클러스터 안에 InfluxDB + Grafana를 추가해 JMeter 결과를 대시보드(처리량, 응답시간, 오류, 동시 사용자, 엔드포인트별)로 확인 → [k8s/README.md](k8s/README.md) 실험 9
+
 ## 버전 현황
 
 | 버전 | 날짜 | 주요 내용 |
 |---|---|---|
+| v9.2.0 | 2026-11-28 | Jenkins 배포의 DB 대응, 부하테스트 Grafana 대시보드 |
 | v9.1.0 | 2026-11-26 | HPA, 클러스터 대상 JMeter 부하테스트 |
 | [v9.0.0](https://github.com/oh130/FastApi-Todos/releases/tag/v9.0.0) | 2026-11-26 | PostgreSQL 전환(복제본 확장 가능), 동시 쓰기 유실 해결 |
 | [v8.0.0](https://github.com/oh130/FastApi-Todos/releases/tag/v8.0.0) | 2026-11-11 | Grafana Loki/Alloy 로그 수집, 컨테이너 이름 충돌 수정, 검색 필터 |
@@ -117,11 +123,11 @@ App/
 ├── SECURITY_OWASP_REVIEW.md     # Claude Code OWASP Top 10 / SonarQube 분석 결과
 ├── docker-compose.yml           # fastapi-app, postgres, jmeter, influxdb, sonarqube, prometheus, grafana, node-exporter, loki, alloy
 ├── .env.example                 # Grafana·PostgreSQL 비밀번호 (.env로 복사해서 사용, git에 안 올라감)
-├── ci/                          # Jenkins Pipeline 스크립트 (참고용, 실제 설정은 Jenkins Job에 붙여넣음)
+├── ci/                          # Jenkins Pipeline 스크립트 (참고용, 실제 설정은 Jenkins Job에 붙여넣음) + remote-deploy.sh(서버에서 DB·앱 컨테이너 배포)
 ├── prometheus/prometheus.yml    # Prometheus 스크레이프 설정
 ├── jmeter/                      # JMeter Dockerfile + 부하테스트 시나리오(.jmx)
 ├── alloy/config.alloy           # Grafana Alloy 로그 수집 파이프라인 설정
-├── k8s/                         # 로컬 쿠버네티스 실습 (앱 Deployment, Postgres StatefulSet, Service, Secret, HPA, JMeter Job) + 실험 기록
+├── k8s/                         # 로컬 쿠버네티스 실습 (앱 Deployment, Postgres StatefulSet, Service, Secret, HPA, JMeter Job, InfluxDB·Grafana) + 실험 기록
 └── fastapi-app/
     ├── main.py                  # FastAPI 앱
     ├── database.py              # DB 연결, 테이블 모델 (환경변수 DATABASE_URL)

@@ -31,11 +31,12 @@ spec:
           command: ["sh", "-c"]
           args:
             - |
-              # InfluxDB는 클러스터에 없어서 Backend Listener 전송은 실패해도 무시한다 (결과는 아래에서 직접 집계).
+              # 결과는 두 곳으로 간다: (1) Backend Listener가 InfluxDB(loadtest-monitoring.yaml)로 실시간 전송 -> Grafana 대시보드,
+              # (2) 아래에서 jtl 파일을 직접 집계해 로그에 출력. InfluxDB를 안 띄웠다면 (1)의 전송 오류는 무시되고 (2)만 남는다.
               jmeter -n -t /plan/fastapi_test_plan.jmx -l /tmp/result.jtl \
                 -JTARGET_HOST=fastapi-todo -JTARGET_PORT=8000 \
                 -JTHREADS="$THREADS" -JRAMP_UP="$RAMP_UP" -JDURATION="$DURATION" \
-                -JINFLUXDB_URL="http://localhost:1/write?db=none" 2>&1 | grep -E "summary (=|\+)|Tidying|end of run"
+                -JINFLUXDB_URL="http://influxdb:8086/write?db=jmeter" 2>&1 | grep -E "summary (=|\+)|Tidying|end of run"
               # 결과 파일(jtl)에서 요청 수, 오류 수, 평균/95%/최대 응답시간(ms)을 집계한다
               tail -n +2 /tmp/result.jtl | cut -d, -f2 | sort -n > /tmp/elapsed.txt
               TOTAL=$(wc -l < /tmp/elapsed.txt)
